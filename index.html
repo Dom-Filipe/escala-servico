@@ -882,7 +882,7 @@ async function appwriteDb(cfgA){
   for(;;){const q=[Query.limit(100)];if(cursor)q.push(Query.cursorAfter(cursor));
     const r=await dbs.listDocuments(D,C,q);r.documents.forEach(put);
     if(r.documents.length<100)break;cursor=r.documents[r.documents.length-1].$id}
-  client.subscribe(`databases.${D}.collections.${C}.documents`,ev=>{
+  client.subscribe([`databases.${D}.collections.${C}.documents`,`databases.${D}.tables.${C}.rows`],ev=>{
     const d=ev.payload;if(!d||!d.$id||d.$id.indexOf('.')<0)return;const [col,id]=split(d.$id);
     if(ev.events.some(e=>e.endsWith('.delete')))cache[col]?.delete(id);else put(d);emit(col)});
   const api={
