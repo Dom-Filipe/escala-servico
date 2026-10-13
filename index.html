@@ -858,11 +858,11 @@ function telaLogin(account,erro){
   return new Promise(res=>{
     $('#main').innerHTML=`<section class="card" style="max-width:420px;margin:40px auto;display:grid;gap:12px">
       <h2>Entrar</h2><p class="small muted" style="margin:0">Use o e-mail e a senha cadastrados no Appwrite (Auth → Users).</p>
-      <form id="login-f" style="display:grid;gap:12px"><label class="f">E-mail<input type="email" id="lg-e" autocomplete="username" required></label>
+      <form id="login-f" style="display:grid;gap:12px"><label class="f">E-mail<input type="email" id="lg-e" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
       <label class="f">Senha<input type="password" id="lg-s" autocomplete="current-password" required></label>
       <div class="err" id="lg-err">${esc(erro||'')}</div><button class="btn pri" type="submit">Entrar</button></form></section>`;
     $('#login-f').addEventListener('submit',async ev=>{ev.preventDefault();
-      try{await account.createEmailPasswordSession($('#lg-e').value.trim(),$('#lg-s').value);res()}
+      try{await account.createEmailPasswordSession($('#lg-e').value.trim().toLowerCase(),$('#lg-s').value);res()}
       catch(e){const t=e&&e.type||'',c=e&&e.code;let m;
         if(t==='user_invalid_credentials'||c===401&&/credential|password/i.test(e.message||''))m='E-mail ou senha incorretos.';
         else if(c===429)m='Muitas tentativas seguidas. Espere alguns minutos e tente de novo.';
