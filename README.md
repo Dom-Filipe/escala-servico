@@ -19,8 +19,32 @@ Sistema web para montar e conferir as escalas de serviço de 24 horas:
 - **Militares**, **Afastamentos** e **Ajustes**.
 
 ## Como rodar
-É um único arquivo `index.html`, sem dependências de build. Abra no navegador ou publique no GitHub Pages / Vercel.
 
-> Os dados são salvos pelo armazenamento da versão publicada no Claude (artifact).
-> Aberto fora dele, o sistema funciona em **modo demonstração** (dados de exemplo, sem salvar).
-> Para uso independente, o próximo passo é ligar o armazenamento a um banco próprio (ex.: Supabase).
+São arquivos estáticos, sem build: `index.html` (o sistema) e `config.js` (configuração do Appwrite).
+Com o `config.js` sem preencher, o sistema abre em **modo demonstração** (dados de exemplo, nada é salvo).
+
+## Ligar ao Appwrite
+
+1. **Projeto**: no console do Appwrite, abra (ou crie) um projeto e anote o **Project ID** e o **API Endpoint** (Settings).
+2. **Banco**: Databases → *Create database* com ID `escala`.
+3. **Coleção**: dentro do banco, *Create collection* com ID `registros` e crie dois atributos do tipo **String**:
+   - `col` — tamanho 40, obrigatório
+   - `dados` — tamanho 1000000, obrigatório
+4. **Permissões da coleção** (Settings da coleção → Permissions): adicione o papel **Users** com *Create, Read, Update, Delete*.
+   Deixe *Document security* desligado.
+5. **Usuário**: Auth → Users → crie o seu usuário com e-mail e senha.
+   Em Auth → Security, ajuste **Users limit** para o número de usuários que vão usar, para ninguém mais conseguir se cadastrar.
+6. **Domínio**: Overview → *Platforms* → *Add platform* → **Web**, com o domínio onde o sistema vai rodar
+   (ex.: `escala-servico.vercel.app`) e também `localhost` para testes.
+7. **Configuração**: edite `config.js` com o endpoint e o Project ID.
+
+### Publicar na Vercel
+*Add New → Project* → importe este repositório → Framework Preset **Other** → *Deploy*. Não precisa de build.
+
+### Levar os dados da versão no Claude
+Na versão no Claude: **Ajustes → Baixar backup (JSON)**. Na versão no Appwrite: **Ajustes → Importar backup**.
+
+## Como os dados ficam no Appwrite
+Uma única coleção (`registros`). Cada documento tem id `<tipo>.<id>` e o conteúdo em JSON no atributo `dados`:
+`militares.*`, `afastamentos.*`, `meses.*` (histórico mensal de cada escala) e `config.geral` (regras e feriados).
+As alterações aparecem em tempo real em todos os aparelhos abertos.

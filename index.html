@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/appwrite@16.0.2/dist/iife/sdk.js"></script>
 </head>
 <body>
 <title>Escala de Serviço 24h</title>
@@ -383,7 +385,7 @@ let rq=false;function render(){if(rq)return;rq=true;requestAnimationFrame(()=>{r
 
 function draw(){
   const t=today(),d=parse(t);
-  $('#now').innerHTML=`${DOWL[d.getUTCDay()]}<br>${brY(t)}`;
+  $('#now').innerHTML=`${DOWL[d.getUTCDay()]}<br>${brY(t)}${state.mode==='appwrite'?'<br><button class="link small" data-act="sair">Sair</button>':''}`;
   const h=(location.hash||'#hoje').slice(1);ui.tab=['hoje','previsao','quadro','militares','afastamentos','ajustes'].includes(h)?h:'hoje';
   document.querySelectorAll('#tabs a').forEach(a=>{if(a.dataset.tab===ui.tab)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
   $('#escbar').innerHTML=ESC_ORDEM.map(e=>{const n=state.loaded?milsEsc(e).length:'';return `<button type="button" class="escbtn" data-act="setEsc" data-e="${e}" aria-pressed="${ui.esc===e}">${ESC[e].nome}<span class="mono">${n!==''?n+' '+ESC[e].quem:''} · ${state.loaded?porDiaDe(e):ESC[e].def}/dia</span></button>`}).join('');
@@ -687,6 +689,10 @@ function viewAjustes(){
     </tbody></table></div>
     <div class="controls" style="margin-top:12px"><label class="f">Data<input type="date" id="fe-d"></label><label class="f" style="min-width:220px">Nome<input type="text" id="fe-n" placeholder="Ex.: Aniversário de Praia Grande"></label><button class="btn" data-act="addFer">Adicionar feriado</button></div>
   </section>
+  <section class="card"><h2>Backup dos dados</h2>
+    <p class="small muted" style="margin:6px 0 12px">Baixe um arquivo com todos os militares, afastamentos, histórico e regras. Use para guardar uma cópia ou para levar os dados para outra versão do sistema (por exemplo, da versão no Claude para a versão no Appwrite).</p>
+    <div class="row"><button class="btn" data-act="backup">Baixar backup (JSON)</button>${state.canWrite?'<button class="btn" data-act="importarArq">Importar backup</button><input type="file" id="bk-file" accept=".json,application/json" hidden>':''}</div>
+    <p class="hint" style="margin-top:8px">Importar grava por cima dos registros com o mesmo identificador e mantém os demais.</p></section>
   <section class="card"><h2>Como a escala é montada</h2><ol class="small" style="margin:8px 0 0;padding-left:1.2rem;display:grid;gap:4px;max-width:70ch">
     <li>Sábado, domingo e feriado são <b>escala vermelha</b>; os demais dias são <b>escala preta</b>. Cada cor tem uma folga separada.</li>
     <li>Cada escala (guarda, cabo de dia e sargento de dia) é independente, com seus próprios militares e folgas. Em cada dia entram os militares com maior folga naquela cor. Empate: quem está há mais tempo sem serviço; depois a ordem da lista.</li>
@@ -764,6 +770,10 @@ const actions={
   novoAfast:e=>dlgAfast(null,e.dataset.id), editAfast:e=>dlgAfast(e.dataset.id),
   editDay:e=>dlgDay(e.dataset.d),
   pvHoje:()=>{ui.pvIni=null;render()},
+  async sair(){try{await awAccount?.deleteSession('current')}catch(e){}location.reload()},
+  async backup(){const f=`escala-backup-${today()}.json`;try{await (downloads||downloadsLocal).save({filename:f,data:backupJSON()})}
+    catch(e){if(e?.code!=='declined')toast('Não foi possível baixar o backup.')}},
+  importarArq:()=>{const i=$('#bk-file');if(i)i.click()},
   editDayEsc:e=>{if(ui.esc!==e.dataset.e){ui.esc=e.dataset.e;saveUi();render();setTimeout(()=>dlgDay(e.dataset.d),30)}else dlgDay(e.dataset.d)},
   carMove:e=>{const tr=$('#car-track');if(!tr)return;const c=tr.querySelector('.dcard');const w=c?c.getBoundingClientRect().width+12:300;const dir=+e.dataset.dir;
     const beh=matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
@@ -835,9 +845,77 @@ document.addEventListener('change',e=>{const id=e.target.id;
   if(id==='pv-ini'){ui.pvIni=e.target.value||null;ui.carScroll=0;render()}
   else if(id==='pv-h'){ui.pvH=+e.target.value;saveUi();render()}
   else if(id==='pv-m'){ui.pvM=e.target.value;saveUi();render()}
-  else if(id==='af-tipo'){ui.afTipo=e.target.value;render()}});
+  else if(id==='af-tipo'){ui.afTipo=e.target.value;render()}
+  else if(id==='bk-file'){const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>importarBackup(String(r.result));r.readAsText(f)}});
 window.addEventListener('hashchange',render);
 dlg.addEventListener('close',()=>{dlgKind=null});
+
+/* ===================== Appwrite (versão independente: GitHub / Vercel) =====================
+   Usa uma única coleção no Appwrite com dois atributos: "col" (string) e "dados" (string grande, JSON).
+   O id de cada documento é "<coleção>.<id>" (ex.: militares.m01, meses.cabo_2026-10, config.geral).
+   Expõe a mesma interface usada pela página (doc().set/delete/onSnapshot, collection().onSnapshot). */
+function telaLogin(account,erro){
+  return new Promise(res=>{
+    $('#main').innerHTML=`<section class="card" style="max-width:420px;margin:40px auto;display:grid;gap:12px">
+      <h2>Entrar</h2><p class="small muted" style="margin:0">Use o e-mail e a senha cadastrados no Appwrite (Auth → Users).</p>
+      <form id="login-f" style="display:grid;gap:12px"><label class="f">E-mail<input type="email" id="lg-e" autocomplete="username" required></label>
+      <label class="f">Senha<input type="password" id="lg-s" autocomplete="current-password" required></label>
+      <div class="err" id="lg-err">${esc(erro||'')}</div><button class="btn pri" type="submit">Entrar</button></form></section>`;
+    $('#login-f').addEventListener('submit',async ev=>{ev.preventDefault();
+      try{await account.createEmailPasswordSession($('#lg-e').value.trim(),$('#lg-s').value);res()}
+      catch(e){$('#lg-err').textContent='E-mail ou senha incorretos, ou o domínio não está liberado em Platforms no Appwrite.'}});
+  });
+}
+async function appwriteDb(cfgA){
+  const {Client,Databases,Account,Query}=window.Appwrite;
+  const client=new Client().setEndpoint(cfgA.endpoint).setProject(cfgA.projectId);
+  const account=new Account(client),dbs=new Databases(client),D=cfgA.databaseId,C=cfgA.collectionId;
+  let user=null;try{user=await account.get()}catch(e){}
+  if(!user){await telaLogin(account);user=await account.get()}
+  awAccount=account;
+  const cache={},lis={};
+  const split=$id=>{const i=$id.indexOf('.');return[$id.slice(0,i),$id.slice(i+1)]};
+  const put=d=>{const [col,id]=split(d.$id);let v={};try{v=JSON.parse(d.dados||'{}')}catch(e){}(cache[col]||=new Map()).set(id,v)};
+  const snapOf=col=>{const m=cache[col]||new Map();return{docs:[...m].map(([id,v])=>({id,exists:true,data:()=>v,metadata:{}})),size:m.size,empty:!m.size,metadata:{}}};
+  const emit=col=>(lis[col]||[]).forEach(f=>f(snapOf(col)));
+  let cursor=null;
+  for(;;){const q=[Query.limit(100)];if(cursor)q.push(Query.cursorAfter(cursor));
+    const r=await dbs.listDocuments(D,C,q);r.documents.forEach(put);
+    if(r.documents.length<100)break;cursor=r.documents[r.documents.length-1].$id}
+  client.subscribe(`databases.${D}.collections.${C}.documents`,ev=>{
+    const d=ev.payload;if(!d||!d.$id||d.$id.indexOf('.')<0)return;const [col,id]=split(d.$id);
+    if(ev.events.some(e=>e.endsWith('.delete')))cache[col]?.delete(id);else put(d);emit(col)});
+  const api={
+    collection:col=>({onSnapshot(next){(lis[col]||=[]).push(next);setTimeout(()=>next(snapOf(col)));return()=>{}}}),
+    doc(path){const [col,id]=path.split('/'),$id=col+'.'+id;return{
+      async set(data){const body={col,dados:JSON.stringify(data)};
+        try{await dbs.updateDocument(D,C,$id,body)}catch(e){if(e.code===404)await dbs.createDocument(D,C,$id,body);else throw e}
+        (cache[col]||=new Map()).set(id,data);emit(col)},
+      async delete(){try{await dbs.deleteDocument(D,C,$id)}catch(e){if(e.code!==404)throw e}cache[col]?.delete(id);emit(col)},
+      onSnapshot(next){const f=()=>{const v=cache[col]?.get(id);next({id,exists:v!==undefined,data:()=>v,metadata:{}})};
+        (lis[col]||=[]).push(f);setTimeout(f);return()=>{}}}}};
+  return api;
+}
+let awAccount=null;
+const downloadsLocal={async save({filename,data}){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'text/plain;charset=utf-8'}));a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);return{status:'saved'}}};
+
+/* ===================== backup ===================== */
+function backupJSON(){const o={sistema:'escala-servico',versao:1,gerado:new Date().toISOString(),config:state.config,militares:{},afastamentos:{},meses:state.meses};
+  for(const [id,m] of Object.entries(state.militares)){const {id:_,...r}=m;o.militares[id]=r}
+  for(const [id,a] of Object.entries(state.afast)){const {id:_,...r}=a;o.afastamentos[id]=r}
+  return JSON.stringify(o,null,1)}
+async function importarBackup(txt){
+  let o;try{o=JSON.parse(txt)}catch(e){toast('Arquivo inválido: não é um backup da escala.');return}
+  if(o.sistema!=='escala-servico'){toast('Arquivo inválido: não é um backup da escala.');return}
+  if(!state.canWrite){toast('Você tem acesso só de leitura.');return}
+  state.busy=true;let n=0;
+  try{if(o.config)await store.setConfig(o.config);
+    for(const [id,m] of Object.entries(o.militares||{})){await store.setMilitar(id,m);n++}
+    for(const [id,a] of Object.entries(o.afastamentos||{})){await store.setAfast(id,a);n++}
+    for(const [k,v] of Object.entries(o.meses||{})){await store.setMonth(k,v.dias||{});n++}
+    toast(`Backup importado: ${n} registros.`)}
+  catch(e){console.error(e);toast(`Importação parou depois de ${n} registros. Tente de novo.`)}
+  finally{state.busy=false;render()}}
 
 /* ===================== inicialização ===================== */
 function loadDemo(){const ex=exemplo(ESC_ORDEM);state.militares=ex.mil;state.afast=ex.af;state.config=ex.config;state.mode='demo';state.loaded=true;render()}
@@ -853,6 +931,11 @@ function subscribe(){
 }
 render();
 (async()=>{
+  const AW=window.ESCALA_CONFIG&&window.ESCALA_CONFIG.appwrite;
+  if(AW&&AW.projectId&&!/SEU_/.test(AW.projectId)&&window.Appwrite){
+    try{db=await appwriteDb(AW);state.mode='appwrite';downloads=downloadsLocal;subscribe();return}
+    catch(e){console.error(e);db=null;$('#main').innerHTML=`<section class="card empty"><h2>Não foi possível conectar ao Appwrite</h2><p>${esc(e.message||String(e))}</p><p>Confira o arquivo config.js (endpoint, projeto, banco e coleção) e se o domínio está em Platforms.</p></section>`;return}
+  }
   const C=window.claude;
   if(!C||!C.use){loadDemo();return}
   try{db=await C.use('db')}catch(e){db=null}
