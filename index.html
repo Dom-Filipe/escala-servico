@@ -267,10 +267,13 @@ const ESC_ORDEM=['guarda','cabo','sgt'];
 const escOf=m=>m.escala&&ESC[m.escala]?m.escala:'guarda';
 const milsEsc=(e)=>Object.values(state.militares).filter(m=>escOf(m)===(e||ui.esc)).sort((a,b)=>(a.ordem||0)-(b.ordem||0));
 const monthKey=(e,m)=>e==='guarda'?m:e+'_'+m;
-function porDiaDe(e,c0){const c=c0||{...DEFAULT_CFG,...state.config};const pe=c.porDiaEscala||{};
-  const v=pe[e]!=null?pe[e]:(e==='guarda'?c.porDia:ESC[e].def);return Math.max(1,parseInt(v)||ESC[e].def)}
+/* escalados por dia: número único ou {P,V} por cor (preta/vermelha) */
+function porDiaDe(e,cor,c0){const c=c0||{...DEFAULT_CFG,...state.config};const pe=c.porDiaEscala||{};
+  let v=pe[e]!=null?pe[e]:(e==='guarda'?c.porDia:ESC[e].def);
+  if(v&&typeof v==='object')v=cor?v[cor]:v.P;return Math.max(1,parseInt(v)||ESC[e].def)}
+function porDiaTxt(e){const p=porDiaDe(e,'P'),v=porDiaDe(e,'V');return p===v?`${p}/dia`:`${p} preta · ${v} verm.`}
 function cfg(e){e=e||(typeof ui!=='undefined'?ui.esc:'guarda');const c={...DEFAULT_CFG,...state.config};if(!c.inicio)c.inicio=today();
-  c.porDia=porDiaDe(e,c);c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
+  c.porDia=porDiaDe(e,'P',c);c.porDiaV=porDiaDe(e,'V',c);c.nDia=cor=>cor==='V'?c.porDiaV:c.porDia;c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
 const store={
   async setMilitar(id,data){if(db)await db.doc('militares/'+id).set(data);state.militares[id]={...data,id}},
   async delMilitar(id){if(db)await db.doc('militares/'+id).delete();delete state.militares[id]},
@@ -290,15 +293,15 @@ const getOv=(d,e)=>state.meses[monthKey(e||ui.esc,d.slice(0,7))]?.dias?.[d]||nul
    - Afastado não concorre e não acumula folga. Dias já fixados (passados ou ajustados à mão) são respeitados. */
 function afastIndex(){const idx={};for(const a of Object.values(state.afast))(idx[a.militarId]||=[]).push(a);return idx}
 function simulate(fim,opt={}){
-  const E=opt.esc||ui.esc,c=cfg(E),N=c.porDia,R=c.descanso;
+  const E=opt.esc||ui.esc,c=cfg(E),R=c.descanso;
   const mils=milsEsc(E);
   const ai=afastIndex();
   const afOn=(id,d)=>(ai[id]||[]).find(a=>a.inicio<=d&&(!a.fim||d<=a.fim));
   const st={},days=[];let before=null,after=null;
   for(let d=c.inicio;d<=fim;d=addDays(d,1)){
-    const ov=getOv(d,E),cd=corDia(d),cor=ov?.cor||cd.cor;
+    const ov=getOv(d,E),cd=corDia(d),cor=ov?.cor||cd.cor,N=c.nDia(cor);
     const ativos=mils.filter(m=>(!m.entrada||m.entrada<=d)&&(!m.saida||d<m.saida));
-    for(const m of ativos)if(!st[m.id])st[m.id]={P:+m.folgaIniP||0,V:+m.folgaIniV||0,last:null};
+    for(const m of ativos)if(!st[m.id])st[m.id]={P:+m.folgaIniP||0,V:+m.folgaIniV||0,last:m.ultimoIni||null};
     const af={},apr={},obr={};const d1=addDays(d,-1),d2=addDays(d,-2);
     for(const m of ativos){const a=afOn(m.id,d);if(a){af[m.id]=a;continue}
       const l=ai[m.id]||[];
@@ -388,7 +391,7 @@ function draw(){
   $('#now').innerHTML=`${DOWL[d.getUTCDay()]}<br>${brY(t)}${state.mode==='appwrite'?'<br><button class="link small" data-act="sair">Sair</button>':''}`;
   const h=(location.hash||'#hoje').slice(1);ui.tab=['hoje','previsao','quadro','militares','afastamentos','ajustes'].includes(h)?h:'hoje';
   document.querySelectorAll('#tabs a').forEach(a=>{if(a.dataset.tab===ui.tab)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
-  $('#escbar').innerHTML=ESC_ORDEM.map(e=>{const n=state.loaded?milsEsc(e).length:'';return `<button type="button" class="escbtn" data-act="setEsc" data-e="${e}" aria-pressed="${ui.esc===e}">${ESC[e].nome}<span class="mono">${n!==''?n+' '+ESC[e].quem:''} · ${state.loaded?porDiaDe(e):ESC[e].def}/dia</span></button>`}).join('');
+  $('#escbar').innerHTML=ESC_ORDEM.map(e=>{const n=state.loaded?milsEsc(e).length:'';return `<button type="button" class="escbtn" data-act="setEsc" data-e="${e}" aria-pressed="${ui.esc===e}">${ESC[e].nome}<span class="mono">${n!==''?n+' '+ESC[e].quem:''} · ${state.loaded?porDiaTxt(e):ESC[e].def+'/dia'}</span></button>`}).join('');
   $('#escbar').hidden=ui.tab==='afastamentos';
   if(!state.loaded){return}
   const views={hoje:viewHoje,previsao:viewPrevisao,quadro:viewQuadro,militares:viewMilitares,afastamentos:viewAfast,ajustes:viewAjustes};
@@ -409,7 +412,7 @@ function banners(){
 function emptyState(){
   const E=ESC[ui.esc],n={guarda:30,cabo:12,sgt:16}[ui.esc];
   return `<section class="card empty"><h2>Nenhum militar na escala de ${E.nome.toLowerCase()}</h2>
-  <p>Cadastre os ${E.quem} que concorrem a esta escala (${porDiaDe(ui.esc)} por dia). Você pode colar a lista inteira de uma vez ou começar com ${n} ${E.quem} de exemplo para ver como a escala se comporta.</p>
+  <p>Cadastre os ${E.quem} que concorrem a esta escala (${porDiaTxt(ui.esc)}). Você pode colar a lista inteira de uma vez ou começar com ${n} ${E.quem} de exemplo para ver como a escala se comporta.</p>
   <div class="row"><button class="btn pri" data-act="importar">Importar lista</button><button class="btn" data-act="addMil">Adicionar um militar</button><button class="btn" data-act="carregarEx">Carregar ${n} de exemplo</button></div></section>`}
 /* Cartões "serviço do dia" (todas as escalas) para deslizar na Previsão */
 function cartoesDias(ini,n){
@@ -463,7 +466,7 @@ function viewHojeEsc(){
   const prox=sim.days.filter(x=>x.d>base).slice(0,7);
   const b=sim.before;
   let roster='';
-  for(let i=0;i<Math.max(c.porDia,day.ids.length);i++){
+  for(let i=0;i<Math.max(c.nDia(day.cor),day.ids.length);i++){
     const id=day.ids[i];
     if(!id){roster+=`<li class="vazio"><span class="grad">—</span><span class="nm">Vaga sem militar</span><span class="meta">efetivo insuficiente</span></li>`;continue}
     const m=state.militares[id],f=b.st[id]?.[day.cor];
@@ -473,7 +476,7 @@ function viewHojeEsc(){
   const ativos=b.ativos.length,afast=Object.keys(b.af).length;
   const desc=b.ativos.filter(m=>!b.af[m.id]&&b.st[m.id].last&&diff(b.st[m.id].last,base)<=c.descanso&&!day.ids.includes(m.id));
   const disp=ativos-afast;
-  const folgaPrev=disp>0?Math.max(0,disp/c.porDia-1):0;
+  const nHoje=c.nDia(day.cor);const folgaPrev=disp>0?Math.max(0,disp/nHoje-1):0;
   const afList=b.ativos.filter(m=>b.af[m.id]).map(m=>{const a=b.af[m.id];return `<li><span>${esc(nome(m.id))}</span><span class="tag bad">${esc(a.tipo)}${a.fim?' até '+br(a.fim):''}</span></li>`}).join('');
   const alertas=sim.days.filter(x=>x.d>=base&&(x.deficit>0||x.reduced.length)).slice(0,8)
     .map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.deficit>0?`<span class="tag bad">faltam ${x.deficit}</span>`:''} ${x.reduced.length?`<span class="tag warn">${x.reduced.length} com descanso reduzido</span>`:''}</span></li>`).join('');
@@ -497,7 +500,7 @@ function viewHojeEsc(){
   <div class="stack">
     <section class="card"><h3>Efetivo</h3>
       <div class="stats"><div class="stat"><b class="num">${ativos}</b><span>na escala</span></div><div class="stat"><b class="num">${afast}</b><span>afastados</span></div><div class="stat"><b class="num">${disp}</b><span>concorrendo</span></div></div>
-      <p class="small muted" style="margin:10px 0 0">Com ${disp} militares e ${c.porDia} por dia, cada um tira serviço a cada ${(disp/c.porDia).toFixed(1).replace('.',',')} dias da mesma cor: folga média de cerca de <b>${folgaPrev.toFixed(1).replace('.',',')}</b> dias pretos (ou vermelhos) entre serviços.</p>
+      <p class="small muted" style="margin:10px 0 0">Com ${disp} militares${c.porDia===c.porDiaV?` e ${c.porDia} por dia, cada um tira serviço a cada ${(disp/c.porDia).toFixed(1).replace('.',',')} dias da mesma cor: folga média de cerca de <b>${folgaPrev.toFixed(1).replace('.',',')}</b> dias entre serviços.`:`, ${c.porDia} na preta e ${c.porDiaV} na vermelha: folga média de cerca de <b>${Math.max(0,disp/c.porDia-1).toFixed(1).replace('.',',')}</b> dias pretos e <b>${Math.max(0,disp/c.porDiaV-1).toFixed(1).replace('.',',')}</b> dias vermelhos entre serviços.`}</p>
     </section>
     <section class="card"><h3>Afastados hoje</h3>${afList?`<ul class="plain">${afList}</ul>`:'<p class="small muted">Ninguém afastado.</p>'}</section>
     <section class="card"><h3>Em descanso</h3>${desc.length?`<ul class="plain">${desc.map(m=>`<li><span>${esc(nome(m.id))}</span><span class="small muted">serviço em ${br(b.st[m.id].last)}</span></li>`).join('')}</ul>`:'<p class="small muted">Ninguém em descanso obrigatório.</p>'}</section>
@@ -543,7 +546,7 @@ function viewPrevisao(){
     <div class="tbl-wrap"><table><thead><tr><th class="num">Ord</th><th>Militar</th><th class="num">Pretos</th><th class="num">Vermelhos</th><th class="num">Total</th></tr></thead><tbody>${dist}</tbody></table></div></details></section>`;
 }
 function csvTexto(sep){
-  const c=cfg(),{days}=previsaoDados();const N=Math.max(c.porDia,...days.map(x=>x.ids.length));
+  const c=cfg(),{days}=previsaoDados();const N=Math.max(c.porDia,c.porDiaV,...days.map(x=>x.ids.length));
   const head=['Data','Dia','Escala','Motivo',...Array.from({length:N},(_,i)=>'Militar '+(i+1)),'Observação'];
   const q=v=>{v=String(v??'');return /[;\t"\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
   const lines=[head.join(sep)];
@@ -563,10 +566,9 @@ function quadroDados(){
   const mils=milsEsc()
     .filter(m=>(!m.entrada||m.entrada<=lastD)&&(!m.saida||m.saida>first));
   // conferência de cada dia
-  const N=c.porDia;
   for(const x of days){
     const p=x.pre||{},prob=[];
-    if(x.ids.length!==N)prob.push(`${x.ids.length} escalados (deveriam ser ${N})`);
+    const N=c.nDia(x.cor);if(x.ids.length!==N)prob.push(`${x.ids.length} escalados (deveriam ser ${N})`);
     for(const id of x.ids){const q=p[id];if(!q){prob.push(nome(id)+' não está na escala nesse dia');continue}
       if(q.af)prob.push(`${nome(id)} escalado durante ${q.af.tipo.toLowerCase()}`);
       if(q.rest)prob.push(`${nome(id)} com menos de ${c.descanso*24} h de descanso (serviço em ${br(q.last)})`);
@@ -598,7 +600,7 @@ function viewQuadro(){
       return `<td class="${q.rest?'rest':''}" title="${esc(`Folga ${x.cor==='P'?'preta':'vermelha'}: ${q.f}${q.rest?' · em descanso':''}`)}">${q.f}</td>`}).join('');
     const k=tot[m.id]||{P:0,V:0};
     return `<tr><th class="nm" scope="row"><span class="mono muted">${m.ordem}</span> ${esc(nome(m.id))}${m.id===ui.pvM?' ◂':''}</th>${cells}<td class="sum">${k.P}</td><td class="sum">${k.V}</td><td class="sum"><b>${k.P+k.V}</b></td></tr>`}).join('');
-  const contagem=days.map(x=>`<td class="${x.ids.length===c.porDia?'ok':'bad'}">${x.ids.length}</td>`).join('');
+  const contagem=days.map(x=>`<td class="${x.ids.length===c.nDia(x.cor)?'ok':'bad'}">${x.ids.length}</td>`).join('');
   const confere=days.map(x=>`<td class="${x.prob.length?'bad':'ok'}" title="${esc(x.prob.join(' | ')||'Dia conferido')}" data-act="editDay" data-d="${x.d}">${x.prob.length?'!':'✓'}</td>`).join('');
   const totP=days.filter(x=>x.cor==='P').length,totV=days.length-totP;
   const probs=days.filter(x=>x.prob.length);
@@ -606,14 +608,14 @@ function viewQuadro(){
   return `<section class="card">
     <div class="spread"><h2>Quadro de folgas · ${ESC[ui.esc].nome} · ${['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mm-1]} ${yy}</h2>
     <div class="row"><button class="btn sm" data-act="qMes" data-m="${prevM}">◂ Mês anterior</button>${mes!==t.slice(0,7)?'<button class="btn sm" data-act="qMes" data-m="">Mês atual</button>':''}<button class="btn sm" data-act="qMes" data-m="${nextM}">Próximo mês ▸</button><button class="btn sm" data-act="qCopiar">Copiar para o Excel</button></div></div>
-    <p class="small muted" style="margin:6px 0 0">Cada linha é um militar e cada coluna é um dia. O número é a folga na cor daquele dia (preta ou vermelha), antes da escala do dia. Em cada coluna, os ${c.porDia} marcados com <b>S</b> precisam ter as maiores folgas entre os disponíveis. A linha <b>Conferência</b> refaz essa verificação dia a dia.</p>
-    <div class="banner" style="margin-top:12px;background:${probs.length?'var(--verm-soft)':'var(--accent-soft)'}"><span>${probs.length?`<b>${probs.length} dia(s) com problema neste mês.</b> Passe o mouse ou toque no <b>!</b> da linha Conferência para ver o motivo, ou clique no dia para corrigir.`:`<b>Mês conferido:</b> ${days.length} dias, todos com ${c.porDia} escalados, descanso de ${c.descanso*24} h respeitado e escala na ordem de folga.`}</span></div>
+    <p class="small muted" style="margin:6px 0 0">Cada linha é um militar e cada coluna é um dia. O número é a folga na cor daquele dia (preta ou vermelha), antes da escala do dia. Em cada coluna, os marcados com <b>S</b> (${c.porDia===c.porDiaV?c.porDia:c.porDia+' na preta e '+c.porDiaV+' na vermelha'}) precisam ter as maiores folgas entre os disponíveis. A linha <b>Conferência</b> refaz essa verificação dia a dia.</p>
+    <div class="banner" style="margin-top:12px;background:${probs.length?'var(--verm-soft)':'var(--accent-soft)'}"><span>${probs.length?`<b>${probs.length} dia(s) com problema neste mês.</b> Passe o mouse ou toque no <b>!</b> da linha Conferência para ver o motivo, ou clique no dia para corrigir.`:`<b>Mês conferido:</b> ${days.length} dias, todos com o efetivo completo, descanso de ${c.descanso*24} h respeitado e escala na ordem de folga.`}</span></div>
     ${probs.length?`<ul class="plain small" style="margin-top:8px">${probs.map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.prob.map(esc).join('<br>')}</span></li>`).join('')}</ul>`:''}
     <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> apresentação (serviço no dia seguinte)</span><span><span class="qk viol s P">S</span> erro</span></div>
     <div class="q-wrap"><table class="q">
       <thead><tr><th class="nm corner" rowspan="2">Militar</th>${head1}<th class="sum" rowspan="2" title="Serviços pretos">P</th><th class="sum" rowspan="2" title="Serviços vermelhos">V</th><th class="sum" rowspan="2">Tot</th></tr><tr>${head2}</tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><th class="nm">Escalados no dia</th>${contagem}<td class="sum">${totP*c.porDia}</td><td class="sum">${totV*c.porDia}</td><td class="sum"></td></tr>
+      <tfoot><tr><th class="nm">Escalados no dia</th>${contagem}<td class="sum">${totP*c.porDia}</td><td class="sum">${totV*c.porDiaV}</td><td class="sum"></td></tr>
       <tr><th class="nm">Conferência</th>${confere}<td class="sum" colspan="3"></td></tr></tfoot>
     </table></div>
     <p class="hint" style="margin-top:8px">Clique no número do dia para trocar militares. Dias antes de ${brY(c.inicio)} (início da contagem) não aparecem.</p>
@@ -675,7 +677,7 @@ function viewAjustes(){
   const ign=c.feriadosIgnorados||[];
   return `<section class="card"><h2>Regras da escala</h2>
     <div class="fgrid" style="margin-top:12px">
-      ${ESC_ORDEM.map(e=>`<label class="f">${ESC[e].nome}: escalados por dia<input type="number" id="cf-por-${e}" min="1" max="20" value="${porDiaDe(e)}"></label>`).join('')}
+      ${ESC_ORDEM.map(e=>`<label class="f">${ESC[e].nome}: escalados na preta<input type="number" id="cf-por-${e}" min="1" max="20" value="${porDiaDe(e,'P')}"></label><label class="f">${ESC[e].nome}: escalados na vermelha<input type="number" id="cf-porv-${e}" min="1" max="20" value="${porDiaDe(e,'V')}"></label>`).join('')}
       <label class="f">Dias de descanso após o serviço<input type="number" id="cf-desc" min="0" max="7" value="${c.descanso}"><span class="hint">2 dias = 48 h. Quem tira sexta não pega sábado nem domingo.</span></label>
       <label class="f">Início da contagem<input type="date" id="cf-ini" value="${c.inicio}"><span class="hint">Data a partir da qual valem as folgas iniciais.</span></label>
     </div>
@@ -720,7 +722,8 @@ function dlgMilitar(id){
   <div class="fgrid"><label class="f">Entra na escala em<input type="date" id="mi-ent" value="${m?.entrada||today()}"></label>
   <label class="f">Sai da escala em<input type="date" id="mi-sai" value="${m?.saida||''}"><span class="hint">Opcional. Transferência, baixa etc.</span></label></div>
   <div class="fgrid"><label class="f">Folga inicial preta<input type="number" min="0" id="mi-fp" value="${m?.folgaIniP??0}"></label>
-  <label class="f">Folga inicial vermelha<input type="number" min="0" id="mi-fv" value="${m?.folgaIniV??0}"></label></div>
+  <label class="f">Folga inicial vermelha<input type="number" min="0" id="mi-fv" value="${m?.folgaIniV??0}"></label>
+  <label class="f">Último serviço antes do início<input type="date" id="mi-ult" value="${m?.ultimoIni||''}"><span class="hint">Opcional. Garante as 48 h de descanso nos primeiros dias.</span></label></div>
   <p class="hint">A folga inicial vale na data de entrada (ou no início da contagem). Folga 0 coloca o militar no fim da fila; uma folga alta faz ele ser escalado logo.</p>
   ${foot(m?'<button type="button" class="btn danger" data-act="delMil">Excluir</button>':'')}`,{id});
 }
@@ -751,7 +754,7 @@ function dlgDay(d){
     const fut=sim.days.find(x=>x.d>d&&x.d<=addDays(d,R)&&x.ids.includes(m.id));
     return{m,f:s[day.cor],a,rest,fut,l,apr:b.apr[m.id],obr:b.obr[m.id]}};
   const cands=b.ativos.map(info).sort((x,y)=>(!!y.obr-!!x.obr)||(!!x.a-!!y.a)||(!!x.apr-!!y.apr)||(!!x.rest-!!y.rest)||(y.f-x.f));
-  const N=Math.max(c.porDia,day.ids.length);
+  const N=Math.max(c.nDia(day.cor),day.ids.length);
   const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
     return `<option value="${k.m.id}" ${cur===k.m.id?'selected':''} ${k.a&&cur!==k.m.id?'disabled':''}>${esc(lab)}</option>`}).join('');
   const slots=Array.from({length:N},(_,i)=>`<div class="slot"><span class="n">${i+1}</span><select class="ctl" id="dd-s${i}">${opt(day.ids[i]||'')}</select></div>`).join('');
@@ -793,9 +796,9 @@ const actions={
     await mutate(async()=>{if(fim<a.inicio)await store.delAfast(a.id);else await store.setAfast(a.id,{...a,fim})},'Retorno registrado: volta à escala hoje')},
   async autoDay(){const d=dlgData.d,m=monthKey(ui.esc,d.slice(0,7));closeDlg();
     await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};delete dias[d];await store.setMonth(m,dias)},'Dia voltou ao cálculo automático')},
-  async salvarCfg(){const c=cfg();const pe={};for(const e of ESC_ORDEM)pe[e]=parseInt($('#cf-por-'+e).value);const por=Math.min(...Object.values(pe)),de=parseInt($('#cf-desc').value),ini=$('#cf-ini').value;
+  async salvarCfg(){const c=cfg();const pe={};for(const e of ESC_ORDEM){const P=parseInt($('#cf-por-'+e).value),V=parseInt($('#cf-porv-'+e).value);pe[e]=P===V?P:{P,V}}const por=Math.min(...ESC_ORDEM.map(e=>porDiaDe(e,'P',{porDiaEscala:pe}))),de=parseInt($('#cf-desc').value),ini=$('#cf-ini').value;
     if(!(por>=1)||!(de>=0)||!ini){toast('Confira os valores: por dia ≥ 1, descanso ≥ 0 e uma data de início.');return}
-    await mutate(()=>store.setConfig({...state.config,porDia:pe.guarda,porDiaEscala:pe,descanso:de,inicio:ini,feriadosNacionais:$('#cf-nac').checked}),'Regras salvas')},
+    await mutate(()=>store.setConfig({...state.config,porDia:porDiaDe('guarda','P',{porDiaEscala:pe}),porDiaEscala:pe,descanso:de,inicio:ini,feriadosNacionais:$('#cf-nac').checked}),'Regras salvas')},
   async togFer(e){const c=cfg(),d=e.dataset.d;let ign=[...(c.feriadosIgnorados||[])];ign=e.checked?ign.filter(x=>x!==d):[...ign,d];
     await mutate(()=>store.setConfig({...state.config,feriadosIgnorados:ign}),e.checked?'Feriado considerado':'Feriado ignorado')},
   async addFer(){const c=cfg(),d=$('#fe-d').value,n=$('#fe-n').value.trim();if(!d){toast('Escolha a data do feriado.');return}
@@ -812,7 +815,7 @@ async function submitDlg(){
     const id=dlgData.id||newId('m'),old=state.militares[id]||{};
     const ent=$('#mi-ent').value||today(),sai=$('#mi-sai').value||null;if(sai&&sai<=ent)return fail('A saída precisa ser depois da entrada.');
     const data={escala:$('#mi-esc').value,ordem:parseInt($('#mi-ord').value)||1,grad:$('#mi-grad').value.trim(),nome:nomeV,entrada:ent,saida:sai,
-      folgaIniP:Math.max(0,parseInt($('#mi-fp').value)||0),folgaIniV:Math.max(0,parseInt($('#mi-fv').value)||0),
+      folgaIniP:Math.max(0,parseInt($('#mi-fp').value)||0),folgaIniV:Math.max(0,parseInt($('#mi-fv').value)||0),ultimoIni:$('#mi-ult').value||null,
       exemplo:!!old.exemplo&&old.nome===nomeV&&old.grad===$('#mi-grad').value.trim()};
     closeDlg();await mutate(()=>store.setMilitar(id,data),dlgData.id?'Militar atualizado':'Militar adicionado');
   }else if(dlgKind==='imp'){
