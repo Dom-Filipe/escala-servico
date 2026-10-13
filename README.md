@@ -25,18 +25,19 @@ Com o `config.js` sem preencher, o sistema abre em **modo demonstração** (dado
 
 ## Ligar ao Appwrite
 
-1. **Projeto**: no console do Appwrite, abra (ou crie) um projeto e anote o **Project ID** e o **API Endpoint** (Settings).
-2. **Banco**: Databases → *Create database* com ID `escala`.
-3. **Coleção**: dentro do banco, *Create collection* com ID `registros` e crie dois atributos do tipo **String**:
-   - `col` — tamanho 40, obrigatório
-   - `dados` — tamanho 1000000, obrigatório
-4. **Permissões da coleção** (Settings da coleção → Permissions): adicione o papel **Users** com *Create, Read, Update, Delete*.
-   Deixe *Document security* desligado.
-5. **Usuário**: Auth → Users → crie o seu usuário com e-mail e senha.
-   Em Auth → Security, ajuste **Users limit** para o número de usuários que vão usar, para ninguém mais conseguir se cadastrar.
-6. **Domínio**: Overview → *Platforms* → *Add platform* → **Web**, com o domínio onde o sistema vai rodar
-   (ex.: `escala-servico.vercel.app`) e também `localhost` para testes.
-7. **Configuração**: edite `config.js` com o endpoint e o Project ID.
+O sistema usa **uma tabela** dentro de um banco que já exista (no plano gratuito só há 1 banco; pode ser o mesmo de outro app).
+
+1. **Projeto**: em Settings, anote o **Project ID** e o **API Endpoint**.
+2. **Banco**: em Databases, abra o banco existente e anote o **Database ID**.
+3. **Tabela**: dentro dele, *Create table* (ou *Create collection*) com ID `escala_registros` e dois campos **String**:
+   - `col`: tamanho 40, obrigatório
+   - `dados`: tamanho 1000000, obrigatório (se o console não aceitar, use o tipo *Text*)
+4. **Usuário**: Auth → *Create user* com seu e-mail e senha. Anote o **User ID** dele.
+5. **Permissões da tabela** (Settings → Permissions): *Add role* → **Select users** → escolha o seu usuário →
+   marque *Create, Read, Update, Delete*. **Não** use "All users" se o projeto tiver outros usuários (ex.: de outro app).
+   Para liberar mais pessoas, repita com cada usuário ou crie um *Team* e dê a permissão ao time.
+6. **Domínio**: Overview → *Add platform* → **Web**, com o domínio da Vercel e `localhost`.
+7. **Configuração**: edite `config.js` com endpoint, Project ID e Database ID.
 
 ### Publicar na Vercel
 *Add New → Project* → importe este repositório → Framework Preset **Other** → *Deploy*. Não precisa de build.
