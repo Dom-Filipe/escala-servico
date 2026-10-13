@@ -5,6 +5,6 @@ window.ESCALA_CONFIG = {
     endpoint: "https://fra.cloud.appwrite.io/v1", // API Endpoint do projeto (Settings)
     projectId: "6acbff2d002e4d3afe17",          // Project ID (Settings)
     databaseId: "jaguarmove",                   // ID do banco (Databases)
-    collectionId: "escala_registros"            // tabela nova criada só para a escala
+    collectionId: "6ace34cd00100d3a6249"        // ID da tabela escala_registros
   }
 };
