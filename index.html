@@ -863,7 +863,13 @@ function telaLogin(account,erro){
       <div class="err" id="lg-err">${esc(erro||'')}</div><button class="btn pri" type="submit">Entrar</button></form></section>`;
     $('#login-f').addEventListener('submit',async ev=>{ev.preventDefault();
       try{await account.createEmailPasswordSession($('#lg-e').value.trim(),$('#lg-s').value);res()}
-      catch(e){$('#lg-err').textContent='E-mail ou senha incorretos, ou o domínio não está liberado em Platforms no Appwrite.'}});
+      catch(e){const t=e&&e.type||'',c=e&&e.code;let m;
+        if(t==='user_invalid_credentials'||c===401&&/credential|password/i.test(e.message||''))m='E-mail ou senha incorretos.';
+        else if(c===429)m='Muitas tentativas seguidas. Espere alguns minutos e tente de novo.';
+        else if(t==='user_session_already_exists'){res();return}
+        else if(!c||c===0||/fetch|network|cors/i.test(e.message||''))m='Sem resposta do Appwrite. Confira se o endereço deste site ('+location.hostname+') está em Overview → Add app → Web.';
+        else m='Não foi possível entrar.';
+        $('#lg-err').textContent=m+' [detalhe: '+(c||'-')+' '+(t||'')+' '+(e&&e.message||'')+']'}});
   });
 }
 async function appwriteDb(cfgA){
