@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html,body{overflow-x:hidden}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <script src="config.js"></script>
+<script src="dados-guarda.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/appwrite@16.0.2/dist/iife/sdk.js"></script>
 </head>
 <body>
@@ -413,7 +414,9 @@ function emptyState(){
   const E=ESC[ui.esc],n={guarda:30,cabo:12,sgt:16}[ui.esc];
   return `<section class="card empty"><h2>Nenhum militar na escala de ${E.nome.toLowerCase()}</h2>
   <p>Cadastre os ${E.quem} que concorrem a esta escala (${porDiaTxt(ui.esc)}). Você pode colar a lista inteira de uma vez ou começar com ${n} ${E.quem} de exemplo para ver como a escala se comporta.</p>
-  <div class="row"><button class="btn pri" data-act="importar">Importar lista</button><button class="btn" data-act="addMil">Adicionar um militar</button><button class="btn" data-act="carregarEx">Carregar ${n} de exemplo</button></div></section>`}
+  <div class="row">${dadosProntos(ui.esc)?`<button class="btn pri" data-act="carregarDados">Carregar efetivo da ${E.nome.toLowerCase()} (${dadosProntos(ui.esc)} militares)</button>`:''}<button class="btn ${dadosProntos(ui.esc)?'':'pri'}" data-act="importar">Importar lista</button><button class="btn" data-act="addMil">Adicionar um militar</button><button class="btn" data-act="carregarEx">Carregar ${n} de exemplo</button></div></section>`}
+/* dados prontos da planilha (arquivo dados-guarda.js, só na versão do GitHub) */
+function dadosProntos(e){const D=window.ESCALA_DADOS;if(!D||!D.militares)return 0;return Object.values(D.militares).filter(m=>(m.escala||'guarda')===e).length}
 /* Cartões "serviço do dia" (todas as escalas) para deslizar na Previsão */
 function cartoesDias(ini,n){
   const fim=addDays(ini,n-1),t=today();
@@ -693,7 +696,7 @@ function viewAjustes(){
   </section>
   <section class="card"><h2>Backup dos dados</h2>
     <p class="small muted" style="margin:6px 0 12px">Baixe um arquivo com todos os militares, afastamentos, histórico e regras. Use para guardar uma cópia ou para levar os dados para outra versão do sistema (por exemplo, da versão no Claude para a versão no Appwrite).</p>
-    <div class="row"><button class="btn" data-act="backup">Baixar backup (JSON)</button>${state.canWrite?'<button class="btn" data-act="importarArq">Importar backup</button><input type="file" id="bk-file" accept=".json,application/json" hidden>':''}</div>
+    <div class="row">${window.ESCALA_DADOS&&state.canWrite?'<button class="btn" data-act="carregarDados">Carregar efetivo da planilha</button>':''}<button class="btn" data-act="backup">Baixar backup (JSON)</button>${state.canWrite?'<button class="btn" data-act="importarArq">Importar backup</button><input type="file" id="bk-file" accept=".json,application/json" hidden>':''}</div>
     <p class="hint" style="margin-top:8px">Importar grava por cima dos registros com o mesmo identificador e mantém os demais.</p></section>
   <section class="card"><h2>Como a escala é montada</h2><ol class="small" style="margin:8px 0 0;padding-left:1.2rem;display:grid;gap:4px;max-width:70ch">
     <li>Sábado, domingo e feriado são <b>escala vermelha</b>; os demais dias são <b>escala preta</b>. Cada cor tem uma folga separada.</li>
@@ -777,6 +780,7 @@ const actions={
   async backup(){const f=`escala-backup-${today()}.json`;try{await (downloads||downloadsLocal).save({filename:f,data:backupJSON()})}
     catch(e){if(e?.code!=='declined')toast('Não foi possível baixar o backup.')}},
   importarArq:()=>{const i=$('#bk-file');if(i)i.click()},
+  async carregarDados(e){if(!window.ESCALA_DADOS)return;if(state.busy)return;e.disabled=true;e.textContent='Carregando…';await importarBackup(JSON.stringify(window.ESCALA_DADOS))},
   editDayEsc:e=>{if(ui.esc!==e.dataset.e){ui.esc=e.dataset.e;saveUi();render();setTimeout(()=>dlgDay(e.dataset.d),30)}else dlgDay(e.dataset.d)},
   carMove:e=>{const tr=$('#car-track');if(!tr)return;const c=tr.querySelector('.dcard');const w=c?c.getBoundingClientRect().width+12:300;const dir=+e.dataset.dir;
     const beh=matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
