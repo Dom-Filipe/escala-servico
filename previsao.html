@@ -96,7 +96,8 @@ function render(){
     const g=new Date(dados.gerado);document.getElementById('atual').textContent=`Atualizada em ${g.toLocaleDateString('pt-BR')} às ${g.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`;
     render();
   }catch(e){console.error(e);document.getElementById('atual').textContent='';
-    document.getElementById('main').innerHTML='<div class="card vazio">A previsão ainda não foi publicada ou não está disponível. Avise quem faz a escala.</div>'}
+    const c=e&&e.code;const motivo=c===404?'ainda não publicada':c===401?'leitura pública bloqueada (ligar Row security na tabela)':(e&&e.message)||'sem conexão';
+    document.getElementById('main').innerHTML=`<div class="card vazio">A previsão ainda não está disponível. Avise quem faz a escala.<div class="small" style="margin-top:8px">Motivo: ${esc(motivo)}</div></div>`}
 })();
 </script>
 </body>
