@@ -265,8 +265,20 @@ const ESC={sgt:{nome:'Sargento de dia',curto:'Sgt de dia',def:1,grad:'3º Sgt',q
            cabo:{nome:'Cabo de dia',curto:'Cb de dia',def:1,grad:'Cb',quem:'cabos'},
            guarda:{nome:'Guarda',curto:'Guarda',def:4,grad:'Sd',quem:'soldados'},
            perm:{nome:'Permanência do Comando',curto:'Perm Cmdo',def:1,grad:'Sd',quem:'militares',soUteis:true}};
+const ESC_BASE=Object.keys(ESC);
 const ESC_ORDEM=['guarda','cabo','sgt','perm'];
-const escOf=m=>m.escala&&ESC[m.escala]?m.escala:'guarda';
+/* escalas criadas pelo sargenteante ficam em config.escalasExtra */
+function rebuildEsc(){
+  for(const k of Object.keys(ESC))if(!ESC_BASE.includes(k))delete ESC[k];
+  ESC_ORDEM.length=0;ESC_ORDEM.push('guarda','cabo','sgt','perm');
+  for(const x of (state.config.escalasExtra||[])){if(!x||!x.id||ESC_BASE.includes(x.id))continue;
+    ESC[x.id]={nome:x.nome,curto:x.curto||x.nome,def:Math.max(1,+x.P||1),grad:x.grad||'Sd',quem:x.quem||'militares',soUteis:!!x.soUteis,extra:true,inicio:x.inicio||null};ESC_ORDEM.push(x.id)}
+  if(typeof ui!=='undefined'&&!ESC[ui.esc])ui.esc='guarda';
+}
+const escNome=e=>(ESC[e]||{nome:e}).nome;
+/* ordem de exibição do serviço do dia: sargento, cabo, perm, escalas criadas, guarda por último */
+const ordemDia=()=>['sgt','cabo','perm',...ESC_ORDEM.filter(e=>!ESC_BASE.includes(e)),'guarda'].filter(e=>ESC[e]);
+const escOf=m=>m.escala||'guarda';
 const milsEsc=(e)=>Object.values(state.militares).filter(m=>escOf(m)===(e||ui.esc)).sort((a,b)=>(a.ordem||0)-(b.ordem||0));
 const monthKey=(e,m)=>e==='guarda'?m:e+'_'+m;
 /* escalados por dia: número único ou {P,V} por cor (preta/vermelha) */
@@ -281,7 +293,7 @@ const store={
   async delMilitar(id){if(db)await db.doc('militares/'+id).delete();delete state.militares[id]},
   async setAfast(id,data){if(db)await db.doc('afastamentos/'+id).set(data);state.afast[id]={...data,id}},
   async delAfast(id){if(db)await db.doc('afastamentos/'+id).delete();delete state.afast[id]},
-  async setConfig(data){if(db)await db.doc('config/geral').set(data);state.config={...data}},
+  async setConfig(data){if(db)await db.doc('config/geral').set(data);state.config={...data};rebuildEsc()},
   async setMonth(m,dias){if(db)await db.doc('meses/'+m).set({dias});state.meses[m]={dias}},
   async setPlan(e,data){if(db)await db.doc('planilha/'+e).set(data);state.plan[e]=data},
 };
@@ -306,7 +318,8 @@ function simulate(fim,opt={}){
   if(mils.some(m=>m.ref)){const refEsc={};for(const m of mils)if(m.ref&&state.militares[m.ref])refEsc[escOf(state.militares[m.ref])]=1;
     for(const e2 of Object.keys(refEsc))if(e2!==E)for(const x of simulate(addDays(fim,1),{esc:e2}).days)for(const i of x.ids)(outros[i]||=new Set()).add(x.d)}
   const bloqDe=(m,d)=>{if(!m.ref||!outros[m.ref])return null;if(outros[m.ref].has(d))return 'ESV';if(outros[m.ref].has(addDays(d,-1)))return 'SSV';return null};
-  for(let d=c.inicio;d<=fim;d=addDays(d,1)){
+  const ini0=ESC[E]&&ESC[E].inicio&&ESC[E].inicio>c.inicio?ESC[E].inicio:c.inicio;
+  for(let d=ini0;d<=fim;d=addDays(d,1)){
     const ov=getOv(d,E),cd=corDia(d),cor=ov?.cor||cd.cor,N=c.nDia(cor);
     if(ESC[E].soUteis&&cor==='V'){days.push({d,cor,motivo:cd.motivo,ids:[],ov:null,reduced:[],deficit:0,af:{},apr:{},obr:{},pre:null,folgaDia:true});continue}
     const ativos=mils.filter(m=>(!m.entrada||m.entrada<=d)&&(!m.saida||d<m.saida));
@@ -430,7 +443,7 @@ function dadosProntos(e){const D=window.ESCALA_DADOS;if(!D||!D.militares)return 
 /* Cartões "serviço do dia" (todas as escalas) para deslizar na Previsão */
 function cartoesDias(ini,n){
   const fim=addDays(ini,n-1),t=today();
-  const es=['sgt','cabo','perm','guarda'].filter(e=>milsEsc(e).length);
+  const es=ordemDia().filter(e=>milsEsc(e).length);
   const maps={};for(const e of es){maps[e]={};for(const x of simulate(fim,{esc:e}).days)if(x.d>=ini)maps[e][x.d]=x}
   let cards='';
   for(let d=ini;d<=fim;d=addDays(d,1)){
@@ -447,7 +460,7 @@ function cartoesDias(ini,n){
 }
 function servicoDoDia(){
   const t=today(),c=cfg(),base=t<c.inicio?c.inicio:t;
-  const cols=['sgt','cabo','perm','guarda'].filter(e=>milsEsc(e).length).map(e=>{
+  const cols=ordemDia().filter(e=>milsEsc(e).length).map(e=>{
     const day=simulate(base,{esc:e}).days.find(x=>x.d===base);if(!day||day.folgaDia)return '';
     return `<div class="sd-col ${ui.esc===e?'on':''}" data-act="setEsc" data-e="${e}"><span class="eyebrow">${ESC[e].nome}</span><div class="sd-nms">${day.ids.length?day.ids.map((id,i)=>`<span>${esc(nomeDia(day,i))}</span>`).join(''):'<span class="err">sem militar</span>'}</div></div>`}).join('');
   if(!cols)return '';
@@ -681,7 +694,7 @@ function viewAfast(){
   const t=today(),all=Object.values(state.afast).filter(a=>!ui.afTipo||a.tipo===ui.afTipo).sort((a,b)=>a.inicio<b.inicio?1:-1);
   const em=all.filter(a=>a.inicio<=t&&(!a.fim||a.fim>=t)),fut=all.filter(a=>a.inicio>t).reverse(),fim=all.filter(a=>a.fim&&a.fim<t).slice(0,30);
   const dias=a=>a.fim?diff(a.inicio,a.fim)+1:null;
-  const row=(a,ativo)=>`<tr><td><b>${esc(nome(a.militarId))}</b><div class="small muted">${state.militares[a.militarId]?ESC[escOf(state.militares[a.militarId])].nome:''}</div></td><td><span class="tag ${a.tipo==='Saúde'?'bad':a.tipo==='Férias'?'ok':'info'}">${esc(a.tipo)}</span></td>
+  const row=(a,ativo)=>`<tr><td><b>${esc(nome(a.militarId))}</b><div class="small muted">${state.militares[a.militarId]?escNome(escOf(state.militares[a.militarId])):''}</div></td><td><span class="tag ${a.tipo==='Saúde'?'bad':a.tipo==='Férias'?'ok':'info'}">${esc(a.tipo)}</span></td>
     <td class="mono small" style="white-space:nowrap">${br(a.inicio)} → ${a.fim?br(a.fim):'sem data'}</td><td class="num mono">${dias(a)??'—'}</td><td class="small muted">${esc(a.obs||'')}</td>
     <td style="white-space:nowrap"><button class="btn sm" data-act="editAfast" data-id="${a.id}">Editar</button>${ativo?` <button class="btn sm" data-act="retorno" data-id="${a.id}">Retornou hoje</button>`:''}</td></tr>`;
   const tbl=(lst,ativo,vazio)=>lst.length?`<div class="tbl-wrap"><table><thead><tr><th>Militar</th><th>Motivo</th><th>Período</th><th class="num">Dias</th><th>Obs.</th><th></th></tr></thead><tbody>${lst.map(a=>row(a,ativo)).join('')}</tbody></table></div>`:`<p class="small muted">${vazio}</p>`;
@@ -701,11 +714,16 @@ function viewAjustes(){
   const ign=c.feriadosIgnorados||[];
   return `<section class="card"><h2>Regras da escala</h2>
     <div class="fgrid" style="margin-top:12px">
-      ${ESC_ORDEM.map(e=>`<label class="f">${ESC[e].nome}: escalados na preta<input type="number" id="cf-por-${e}" min="1" max="20" value="${porDiaDe(e,'P')}"></label>${ESC[e].soUteis?`<input type="hidden" id="cf-porv-${e}" value="${porDiaDe(e,'P')}">`:`<label class="f">${ESC[e].nome}: escalados na vermelha<input type="number" id="cf-porv-${e}" min="1" max="20" value="${porDiaDe(e,'V')}"></label>`}`).join('')}
+      ${''&&ESC_ORDEM.map(e=>`<label class="f">${ESC[e].nome}: escalados na preta<input type="number" id="cf-por-${e}" min="1" max="20" value="${porDiaDe(e,'P')}"></label>${ESC[e].soUteis?`<input type="hidden" id="cf-porv-${e}" value="${porDiaDe(e,'P')}">`:`<label class="f">${ESC[e].nome}: escalados na vermelha<input type="number" id="cf-porv-${e}" min="1" max="20" value="${porDiaDe(e,'V')}"></label>`}`).join('')}
       <label class="f">Dias de descanso após o serviço<input type="number" id="cf-desc" min="0" max="7" value="${c.descanso}"><span class="hint">2 dias = 48 h. Quem tira sexta não pega sábado nem domingo.</span></label>
       <label class="f">Início da contagem<input type="date" id="cf-ini" value="${c.inicio}"><span class="hint">Data a partir da qual valem as folgas iniciais.</span></label>
     </div>
     <div class="row" style="margin-top:14px"><button class="btn pri" data-act="salvarCfg">Salvar regras</button></div></section>
+  <section class="card"><div class="spread"><h2>Escalas</h2>${state.canWrite?'<button class="btn sm pri" data-act="novaEscala">Nova escala</button>':''}</div>
+    <p class="small muted" style="margin:6px 0 10px">Cada escala tem seus próprios militares, folgas e histórico. As regras de descanso, afastamento e feriados valem para todas.</p>
+    <div class="tbl-wrap"><table><thead><tr><th>Escala</th><th class="num">Preta</th><th class="num">Vermelha</th><th class="num">Militares</th><th></th></tr></thead><tbody>
+    ${ESC_ORDEM.map(e=>`<tr><td><b>${esc(ESC[e].nome)}</b>${ESC[e].extra?' <span class="tag">criada</span>':''}${ESC[e].soUteis?'<div class="small muted">só dias úteis</div>':''}</td><td class="num mono">${porDiaDe(e,'P')}</td><td class="num mono">${ESC[e].soUteis?'—':porDiaDe(e,'V')}</td><td class="num mono">${milsEsc(e).length}</td><td>${state.canWrite?`<button class="btn sm" data-act="editEscala" data-e="${e}">Editar</button>`:''}</td></tr>`).join('')}
+    </tbody></table></div></section>
   <section class="card"><h2>Feriados (escala vermelha)</h2>
     <p class="small muted" style="margin:6px 0 10px">Os feriados nacionais são calculados sozinhos, inclusive Carnaval e Corpus Christi. Desmarque os que a sua OM não considera. Acrescente os feriados municipais e estaduais abaixo.</p>
     <label class="row small"><input type="checkbox" id="cf-nac" ${c.feriadosNacionais!==false?'checked':''}> Usar feriados nacionais</label>
@@ -742,6 +760,20 @@ function closeDlg(){if(dlg.open)dlg.close();dlgKind=null}
 const foot=(extra='')=>`<div class="dlg-foot"><div>${extra}</div><div class="row"><button type="button" class="btn" data-act="fechar">Cancelar</button><button type="submit" class="btn pri">Salvar</button></div></div><div class="err" id="dlg-err"></div>`;
 const GRADS=['Sd','Sd EV','Cb','3º Sgt','2º Sgt','1º Sgt','ST','Asp','2º Ten','1º Ten','Cap'];
 
+function dlgEscala(e){
+  const x=e?ESC[e]:null;const base=e&&ESC_BASE.includes(e);
+  openDlg('esc',`<h2>${x?'Editar escala':'Nova escala'}</h2>
+  ${base?`<p class="hint">Escala padrão: dá para mudar quantos entram por dia. O nome fica fixo.</p>`:`<div class="fgrid"><label class="f">Nome da escala<input id="es-nome" value="${esc(x?.nome||'')}" placeholder="Ex.: Motorista de dia" required></label>
+  <label class="f">Nome curto<input id="es-curto" value="${esc(x?.curto||'')}" placeholder="Ex.: Mot dia"></label></div>
+  <div class="fgrid"><label class="f">Quem concorre (no plural)<input id="es-quem" value="${esc(x?.quem||'militares')}" placeholder="soldados, cabos, motoristas…"></label>
+  <label class="f">Posto/grad. padrão<input id="es-grad" list="grads" value="${esc(x?.grad||'Sd')}"></label></div>
+  <datalist id="grads">${GRADS.map(g=>`<option value="${g}">`).join('')}</datalist>`}
+  <div class="fgrid"><label class="f">Escalados na preta<input type="number" id="es-p" min="1" max="30" value="${x?porDiaDe(e,'P'):1}"></label>
+  <label class="f" id="es-v-wrap" ${x?.soUteis?'hidden':''}>Escalados na vermelha<input type="number" id="es-v" min="1" max="30" value="${x?porDiaDe(e,'V'):1}"></label></div>
+  ${base?'':`<label class="row small"><input type="checkbox" id="es-uteis" ${x?.soUteis?'checked':''}> Só dias úteis (sem sábado, domingo e feriado), como a Perm Cmdo</label>`}
+  <p class="hint">Depois de criar, cadastre os militares em <b>Militares</b>. Se o militar já está em outra escala, escolha "Mesmo militar de" no cadastro: assim ele não é escalado aqui no dia em que entra ou sai de serviço lá.</p>
+  ${foot(x&&!base?'<button type="button" class="btn danger" data-act="delEscala">Excluir escala</button>':'')}`,{e});
+}
 function dlgMilitar(id){
   const m=id?state.militares[id]:null,c=cfg();
   const E=m?escOf(m):ui.esc;const ord=m?m.ordem:Math.max(0,...milsEsc(E).map(x=>x.ordem||0))+1;
@@ -750,6 +782,7 @@ function dlgMilitar(id){
   <label class="f">Escala<select id="mi-esc">${ESC_ORDEM.map(e=>`<option value="${e}" ${E===e?'selected':''}>${ESC[e].nome}</option>`).join('')}</select></label>
   <label class="f">Nome de guerra<input id="mi-nome" value="${esc(m?.nome||'')}" required></label>
   <label class="f">Ordem na lista<input type="number" id="mi-ord" value="${ord}"></label></div>
+  <label class="f">Mesmo militar de outra escala<select id="mi-ref"><option value="">Nenhum</option>${ESC_ORDEM.filter(e2=>e2!==E).map(e2=>`<optgroup label="${esc(ESC[e2].nome)}">${milsEsc(e2).map(o=>`<option value="${o.id}" ${m?.ref===o.id?'selected':''}>${esc(nome(o.id))}</option>`).join('')}</optgroup>`).join('')}</select><span class="hint">Impede escalar no dia em que ele entra ou sai de serviço na outra escala.</span></label>
   <datalist id="grads">${GRADS.map(g=>`<option value="${g}">`).join('')}</datalist>
   <div class="fgrid"><label class="f">Entra na escala em<input type="date" id="mi-ent" value="${m?.entrada||today()}"></label>
   <label class="f">Sai da escala em<input type="date" id="mi-sai" value="${m?.saida||''}"><span class="hint">Opcional. Transferência, baixa etc.</span></label></div>
@@ -809,6 +842,10 @@ const actions={
   async backup(){const f=`escala-backup-${today()}.json`;try{await (downloads||downloadsLocal).save({filename:f,data:backupJSON()})}
     catch(e){if(e?.code!=='declined')toast('Não foi possível baixar o backup.')}},
   importarArq:()=>{const i=$('#bk-file');if(i)i.click()},
+  novaEscala:()=>dlgEscala(null), editEscala:e=>dlgEscala(e.dataset.e),
+  async delEscala(e){const id=dlgData.e;if(milsEsc(id).length){$('#dlg-err').textContent=`Remova ou mude de escala os ${milsEsc(id).length} militares antes de excluir.`;return}
+    if(e.dataset.ok!=='1'){e.dataset.ok='1';e.textContent='Confirmar exclusão';return}
+    closeDlg();await mutate(async()=>{const c={...state.config};c.escalasExtra=(c.escalasExtra||[]).filter(x=>x.id!==id);const pe={...(c.porDiaEscala||{})};delete pe[id];c.porDiaEscala=pe;await store.setConfig(c)},'Escala excluída')},
   async copiarLink(){const v=$('#pub-link').value;try{await navigator.clipboard.writeText(v);toast('Link copiado')}catch(e){$('#pub-link').select();toast('Selecione e copie o link')}},
   async publicarAgora(){toast('Publicando…');await publicarPrevisao();render();toast(state.pubOk?'Previsão publicada':'Não foi possível publicar')},
   planArq:()=>{const i=$('#pl-file');if(i)i.click()},
@@ -840,8 +877,8 @@ const actions={
     await mutate(async()=>{if(fim<a.inicio)await store.delAfast(a.id);else await store.setAfast(a.id,{...a,fim})},'Retorno registrado: volta à escala hoje')},
   async autoDay(){const d=dlgData.d,m=monthKey(ui.esc,d.slice(0,7));closeDlg();
     await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};delete dias[d];await store.setMonth(m,dias)},'Dia voltou ao cálculo automático')},
-  async salvarCfg(){const c=cfg();const pe={};for(const e of ESC_ORDEM){const P=parseInt($('#cf-por-'+e).value),V=parseInt($('#cf-porv-'+e).value);pe[e]=P===V?P:{P,V}}const por=Math.min(...ESC_ORDEM.map(e=>porDiaDe(e,'P',{porDiaEscala:pe}))),de=parseInt($('#cf-desc').value),ini=$('#cf-ini').value;
-    if(!(por>=1)||!(de>=0)||!ini){toast('Confira os valores: por dia ≥ 1, descanso ≥ 0 e uma data de início.');return}
+  async salvarCfg(){const c=cfg();const pe={...(state.config.porDiaEscala||{})};const por=1,de=parseInt($('#cf-desc').value),ini=$('#cf-ini').value;
+    if(!(de>=0)||!ini){toast('Confira os valores: descanso ≥ 0 e uma data de início.');return}
     await mutate(()=>store.setConfig({...state.config,porDia:porDiaDe('guarda','P',{porDiaEscala:pe}),porDiaEscala:pe,descanso:de,inicio:ini,feriadosNacionais:$('#cf-nac').checked}),'Regras salvas')},
   async togFer(e){const c=cfg(),d=e.dataset.d;let ign=[...(c.feriadosIgnorados||[])];ign=e.checked?ign.filter(x=>x!==d):[...ign,d];
     await mutate(()=>store.setConfig({...state.config,feriadosIgnorados:ign}),e.checked?'Feriado considerado':'Feriado ignorado')},
@@ -859,7 +896,7 @@ async function submitDlg(){
     const id=dlgData.id||newId('m'),old=state.militares[id]||{};
     const ent=$('#mi-ent').value||today(),sai=$('#mi-sai').value||null;if(sai&&sai<=ent)return fail('A saída precisa ser depois da entrada.');
     const data={escala:$('#mi-esc').value,ordem:parseInt($('#mi-ord').value)||1,grad:$('#mi-grad').value.trim(),nome:nomeV,entrada:ent,saida:sai,
-      folgaIniP:Math.max(0,parseInt($('#mi-fp').value)||0),folgaIniV:Math.max(0,parseInt($('#mi-fv').value)||0),ultimoIni:$('#mi-ult').value||null,
+      folgaIniP:Math.max(0,parseInt($('#mi-fp').value)||0),folgaIniV:Math.max(0,parseInt($('#mi-fv').value)||0),ultimoIni:$('#mi-ult').value||null,ref:$('#mi-ref').value||null,
       exemplo:!!old.exemplo&&old.nome===nomeV&&old.grad===$('#mi-grad').value.trim()};
     closeDlg();await mutate(()=>store.setMilitar(id,data),dlgData.id?'Militar atualizado':'Militar adicionado');
   }else if(dlgKind==='imp'){
@@ -883,6 +920,19 @@ async function submitDlg(){
     const ids=[];for(let i=0;i<dlgData.N;i++){const v=$('#dd-s'+i).value;if(v){if(ids.includes(v))return fail(nome(v)+' aparece duas vezes.');ids.push(v)}}
     const {d,cor}=dlgData,m=monthKey(ui.esc,d.slice(0,7)),obs=$('#dd-o').value.trim();closeDlg();
     await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};dias[d]={ids,nomes:ids.map(i=>nome(i)),cor,manual:true,obs};await store.setMonth(m,dias)},`Escala de ${br(d)} ajustada`);
+  }else if(dlgKind==='esc'){
+    const e0=dlgData.e,base=e0&&ESC_BASE.includes(e0);
+    const P=parseInt($('#es-p').value),uteis=base?!!ESC[e0].soUteis:!!$('#es-uteis')?.checked,V=uteis?P:parseInt($('#es-v').value);
+    if(!(P>=1)||!(V>=1))return fail('Informe quantos militares entram por dia (mínimo 1).');
+    const c={...state.config},pe={...(c.porDiaEscala||{})};let extras=[...(c.escalasExtra||[])];let id=e0;
+    if(!base){const nomeE=$('#es-nome').value.trim();if(!nomeE)return fail('Dê um nome para a escala.');
+      if(!id){const slug=nomeE.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'').slice(0,14)||'escala';
+        id='x_'+slug;let k=2;while(ESC[id])id='x_'+slug.slice(0,12)+k++}
+      const reg={id,inicio:(e0&&ESC[e0]?.inicio)||today(),nome:nomeE,curto:$('#es-curto').value.trim()||nomeE,quem:$('#es-quem').value.trim()||'militares',grad:$('#es-grad').value.trim()||'Sd',soUteis:uteis,P,V};
+      extras=extras.filter(x=>x.id!==id).concat(reg)}
+    pe[id]=P===V?P:{P,V};c.porDiaEscala=pe;c.escalasExtra=extras;if(!c.inicio)c.inicio=cfg().inicio;
+    closeDlg();await mutate(()=>store.setConfig(c),e0?'Escala atualizada':'Escala criada');
+    if(!e0){ui.esc=id;saveUi();location.hash='#militares';render()}
   }else closeDlg();
 }
 dform.addEventListener('submit',e=>{e.preventDefault();submitDlg()});
@@ -893,6 +943,7 @@ document.addEventListener('change',e=>{const id=e.target.id;
   else if(id==='pv-h'){ui.pvH=+e.target.value;saveUi();render()}
   else if(id==='pv-m'){ui.pvM=e.target.value;saveUi();render()}
   else if(id==='af-tipo'){ui.afTipo=e.target.value;render()}
+  else if(id==='es-uteis'){const w=$('#es-v-wrap');if(w)w.hidden=e.target.checked}
   else if(id==='pl-file'){const f=e.target.files&&e.target.files[0];if(!f)return;e.target.value='';
     (async()=>{try{toast('Lendo a planilha…');const X=await carregarXLSX();const P=lerPlanilha(X,await f.arrayBuffer());dlgPlanilha(P)}catch(err){console.error(err);toast('Não consegui ler esse arquivo. Exporte a planilha como Excel (.xlsx).')}})()}
   else if(id==='bk-file'){const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>importarBackup(String(r.result));r.readAsText(f)}});
@@ -1072,7 +1123,7 @@ let pubTimer=null;
 function agendarPublicacao(){if(state.mode!=='appwrite'||!db||!db.publish||!state.canWrite)return;clearTimeout(pubTimer);pubTimer=setTimeout(publicarPrevisao,1500)}
 async function publicarPrevisao(){
   try{const t=today(),fim=addDays(t,45),escalas={};
-    for(const e of ESC_ORDEM){if(!milsEsc(e).length)continue;const sim=simulate(fim,{esc:e});
+    for(const e of ordemDia()){if(!milsEsc(e).length)continue;const sim=simulate(fim,{esc:e});
       escalas[e]={nome:ESC[e].nome,dias:sim.days.filter(x=>x.d>=t&&!x.folgaDia).map(x=>({d:x.d,c:x.cor,f:x.motivo&&x.motivo.startsWith('Feriado')?x.motivo.replace('Feriado · ',''):null,n:x.ids.map((id,i)=>nomeDia(x,i)),p:x.ov?.obs==='Planilha da Cia'?1:0}))}}
     await db.publish('publico/previsao',{gerado:new Date().toISOString(),hoje:t,escalas});state.pubOk=true}
   catch(e){console.error('publicação da previsão',e);state.pubOk=false}
@@ -1098,7 +1149,7 @@ async function importarBackup(txt){
   finally{state.busy=false;render()}}
 
 /* ===================== inicialização ===================== */
-function loadDemo(){const ex=exemplo(ESC_ORDEM);state.militares=ex.mil;state.afast=ex.af;state.config=ex.config;state.mode='demo';state.loaded=true;render()}
+function loadDemo(){const ex=exemplo(['guarda','cabo','sgt']);state.militares=ex.mil;state.afast=ex.af;state.config=ex.config;rebuildEsc();state.mode='demo';state.loaded=true;render()}
 function subscribe(){
   let pend=5;const first={};
   const wrap=(k,f)=>snap=>{f(snap);if(!first[k]){first[k]=1;if(--pend===0){state.loaded=true;agendarPublicacao()}}render()};
@@ -1108,7 +1159,7 @@ function subscribe(){
   db.collection('afastamentos').onSnapshot(wrap('a',s=>{state.afast=toMap(s)}),onErr);
   db.collection('meses').onSnapshot(wrap('x',s=>{const o={};s.docs.forEach(d=>o[d.id]=d.data());state.meses=o}),onErr);
   db.collection('planilha').onSnapshot(wrap('p',s=>{const o={};s.docs.forEach(d=>o[d.id]=d.data());state.plan=o}),onErr);
-  db.doc('config/geral').onSnapshot(wrap('c',s=>{state.config=s.exists?{...s.data()}:{}}),onErr);
+  db.doc('config/geral').onSnapshot(wrap('c',s=>{state.config=s.exists?{...s.data()}:{};rebuildEsc()}),onErr);
 }
 render();
 (async()=>{

@@ -59,7 +59,7 @@ main{padding-block:16px 48px;display:grid;gap:14px}
 const DOWL=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];const MES=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const parse=s=>new Date(s+'T12:00:00');const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=s=>String(s||'').normalize('NFKD').replace(/[̀-ͯ]/g,'').toUpperCase();
-const ORDEM=['sgt','cabo','perm','guarda'];
+let ORDEM=[]; // vem da publicação, na ordem do serviço do dia (inclui escalas criadas no app)
 let dados=null,filtro='todas',busca='';
 try{busca=localStorage.getItem('prev-nome')||'';filtro=localStorage.getItem('prev-filtro')||'todas'}catch(e){}
 function salvar(){try{localStorage.setItem('prev-nome',busca);localStorage.setItem('prev-filtro',filtro)}catch(e){}}
@@ -93,6 +93,7 @@ function render(){
     const {Client,Databases}=window.Appwrite;const client=new Client().setEndpoint(A.endpoint).setProject(A.projectId);
     const doc=await new Databases(client).getDocument(A.databaseId,A.collectionId,'publico.previsao');
     dados=JSON.parse(doc.dados);
+    ORDEM=Object.keys(dados.escalas||{});
     const g=new Date(dados.gerado);document.getElementById('atual').textContent=`Atualizada em ${g.toLocaleDateString('pt-BR')} às ${g.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`;
     render();
   }catch(e){console.error(e);document.getElementById('atual').textContent='';

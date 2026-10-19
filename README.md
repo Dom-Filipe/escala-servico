@@ -27,6 +27,13 @@ O app do editor publica essa cópia sozinho a cada alteração e ao ser aberto (
 para qualquer pessoa e edição só do editor). Requer **Row security** ligado na tabela do Appwrite.
 O militar digita o nome de guerra e vê os próprios serviços.
 
+## Criar escalas
+Em **Ajustes → Escalas → Nova escala** o sargenteante cria um novo posto ou função (ex.: motorista de dia):
+nome, quantos entram na preta e na vermelha, e se é só em dias úteis. A escala nova ganha previsão, quadro,
+conferência, serviço do dia e entra na página pública. No cadastro do militar, "Mesmo militar de outra escala"
+impede escalá-lo no dia em que entra ou sai de serviço na outra escala. Escalas criadas podem ser editadas e
+excluídas (quando não têm militares).
+
 ## Abas
 - **Hoje**: serviço do dia em todas as escalas, efetivo, afastados, descanso e alertas.
 - **Previsão**: cartões dia a dia para deslizar, tabela de até 180 dias, destaque de militar e exportação para Excel.
