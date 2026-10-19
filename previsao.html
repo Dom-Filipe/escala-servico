@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Previsão da Escala</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Página pública só de leitura: lista de dias com as escalas, busca por nome */
+:root{
+  --bg:#eef0eb;--surface:#fff;--surface-2:#f6f7f3;--ink:#1a1e18;--muted:#5b6457;--line:#d6dbd0;
+  --accent:#3d5a2a;--accent-ink:#fff;--accent-soft:#e3ebd9;--preta-bg:#1c1d1f;--preta-fg:#f4f4f2;--verm:#b42318;--verm-soft:#fbe6e3;
+  --hl:#fff1a8;--hl-ink:#1a1e18;
+  --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;--f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;--f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{--bg:#111410;--surface:#191d17;--surface-2:#20251e;--ink:#e5e9e0;--muted:#9aa492;--line:#2e352a;
+  --accent:#9fc47f;--accent-ink:#111410;--accent-soft:#25301f;--preta-bg:#e9ebe6;--preta-fg:#151614;--verm:#ff8a7a;--verm-soft:#3a1a16;--hl:#5a4d0e;--hl-ink:#fff6c7;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{overflow-x:hidden}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--f-body)}
+.wrap{max-width:860px;margin:0 auto;padding-inline:16px}
+header{background:var(--surface);border-bottom:1px solid var(--line)}
+header .wrap{padding-block:16px 12px;display:grid;gap:4px}
+.eyebrow{font-family:var(--f-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+h1{font-family:var(--f-display);font-size:2rem;font-weight:700;margin:0;line-height:1}
+main{padding-block:16px 48px;display:grid;gap:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px}
+.busca{display:grid;gap:8px}
+.busca input{width:100%;font:inherit;font-size:1rem;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+.filtros{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.filtros button{font:600 .95rem var(--f-display);text-transform:uppercase;letter-spacing:.04em;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;white-space:nowrap;cursor:pointer}
+.filtros button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.meus{display:grid;gap:6px}
+.meus li{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)}
+.meus ul{list-style:none;margin:0;padding:0}
+.chip{display:inline-block;font:600 .75rem var(--f-display);text-transform:uppercase;letter-spacing:.06em;padding:1px 8px;border-radius:4px}
+.chip.P{background:var(--preta-bg);color:var(--preta-fg)}.chip.V{background:var(--verm);color:#fff}
+.dia{display:grid;gap:8px;border-left:5px solid var(--preta-bg)}
+.dia.V{border-left-color:var(--verm)}
+.dia-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.dia-top h2{font-family:var(--f-display);font-size:1.4rem;margin:0;text-transform:uppercase}
+.bloco{background:var(--surface-2);border-radius:6px;padding:8px 10px}
+.bloco .nms{display:flex;flex-wrap:wrap;gap:2px 14px;font:600 1.15rem var(--f-display)}
+.hl{background:var(--hl);color:var(--hl-ink);border-radius:3px;padding:0 4px}
+.muted{color:var(--muted)}.small{font-size:.85rem}
+.aviso{font-size:.85rem;color:var(--muted)}
+.vazio{text-align:center;padding:32px 16px;color:var(--muted)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/appwrite@16.0.2/dist/iife/sdk.js"></script>
+</head>
+<body>
+<header><div class="wrap"><span class="eyebrow">Serviço de 24 horas · somente leitura</span><h1>Previsão da Escala</h1><span class="small muted" id="atual">Carregando…</span></div></header>
+<main class="wrap" id="main"><div class="card vazio">Carregando a previsão…</div></main>
+<script>
+const DOWL=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];const MES=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const parse=s=>new Date(s+'T12:00:00');const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=s=>String(s||'').normalize('NFKD').replace(/[̀-ͯ]/g,'').toUpperCase();
+const ORDEM=['sgt','cabo','perm','guarda'];
+let dados=null,filtro='todas',busca='';
+try{busca=localStorage.getItem('prev-nome')||'';filtro=localStorage.getItem('prev-filtro')||'todas'}catch(e){}
+function salvar(){try{localStorage.setItem('prev-nome',busca);localStorage.setItem('prev-filtro',filtro)}catch(e){}}
+function marca(n){const b=norm(busca).trim();return b&&norm(n).includes(b)?`<span class="hl">${esc(n)}</span>`:esc(n)}
+function render(){
+  if(!dados)return;
+  const es=ORDEM.filter(e=>dados.escalas[e]);
+  const porDia={};for(const e of es)for(const x of dados.escalas[e].dias){(porDia[x.d]||={d:x.d,c:x.c,f:x.f,e:{}}).e[e]=x;if(x.c==='V')porDia[x.d].c='V';if(x.f)porDia[x.d].f=x.f}
+  const dias=Object.values(porDia).sort((a,b)=>a.d<b.d?-1:1);
+  const b=norm(busca).trim();
+  const meus=b?dias.flatMap(dd=>Object.entries(dd.e).filter(([e,x])=>x.n.some(n=>norm(n).includes(b))).map(([e,x])=>({d:dd.d,c:dd.c,e}))):[];
+  const g=d=>{const x=parse(d);return `${DOWL[x.getDay()]}, ${x.getDate()} ${MES[x.getMonth()]}`};
+  document.getElementById('main').innerHTML=`
+  <section class="card busca">
+    <label class="small muted" for="nome">Digite seu nome de guerra para ver seus serviços</label>
+    <input id="nome" type="search" placeholder="Ex.: PORTO" value="${esc(busca)}" autocomplete="off" autocapitalize="characters">
+    <div class="filtros" role="group" aria-label="Escala">${['todas',...es].map(e=>`<button type="button" data-f="${e}" aria-pressed="${filtro===e}">${e==='todas'?'Todas':esc(dados.escalas[e].nome)}</button>`).join('')}</div>
+  </section>
+  ${b?`<section class="card meus"><b>Seus próximos serviços</b>${meus.length?`<ul>${meus.slice(0,12).map(m=>`<li><span>${g(m.d)}</span><span><span class="chip ${m.c}">${m.c==='V'?'Vermelha':'Preta'}</span> ${esc(dados.escalas[m.e].nome)}</span></li>`).join('')}</ul>`:'<p class="small muted" style="margin:0">Nenhum serviço previsto com esse nome nos próximos dias.</p>'}</section>`:''}
+  ${dias.map(dd=>{const blocos=ORDEM.filter(e=>dd.e[e]&&(filtro==='todas'||filtro===e)).map(e=>`<div class="bloco"><span class="eyebrow">${esc(dados.escalas[e].nome)}</span><div class="nms">${dd.e[e].n.map(n=>`<span>${marca(n)}</span>`).join('')||'<span class="muted">—</span>'}</div></div>`).join('');
+    if(!blocos)return '';const x=parse(dd.d);
+    return `<article class="card dia ${dd.c}"><div class="dia-top"><h2>${dd.d===dados.hoje?'Hoje · ':''}${DOWL[x.getDay()]} ${x.getDate()} ${MES[x.getMonth()]}</h2><span><span class="chip ${dd.c}">${dd.c==='V'?'Escala vermelha':'Escala preta'}</span>${dd.f?` <span class="small muted">${esc(dd.f)}</span>`:''}</span></div>${blocos}</article>`}).join('')}
+  <p class="aviso">Previsão sujeita a alteração por afastamentos, trocas e missões. Vale a escala publicada oficialmente.</p>`;
+  const i=document.getElementById('nome');i.addEventListener('input',()=>{busca=i.value;salvar();const pos=i.selectionStart;render();const n=document.getElementById('nome');n.focus();n.setSelectionRange(pos,pos)});
+  document.querySelectorAll('.filtros button').forEach(bt=>bt.addEventListener('click',()=>{filtro=bt.dataset.f;salvar();render()}));
+}
+(async()=>{
+  const A=window.ESCALA_CONFIG&&window.ESCALA_CONFIG.appwrite;
+  try{
+    if(!A||!window.Appwrite)throw new Error('config');
+    const {Client,Databases}=window.Appwrite;const client=new Client().setEndpoint(A.endpoint).setProject(A.projectId);
+    const doc=await new Databases(client).getDocument(A.databaseId,A.collectionId,'publico.previsao');
+    dados=JSON.parse(doc.dados);
+    const g=new Date(dados.gerado);document.getElementById('atual').textContent=`Atualizada em ${g.toLocaleDateString('pt-BR')} às ${g.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`;
+    render();
+  }catch(e){console.error(e);document.getElementById('atual').textContent='';
+    document.getElementById('main').innerHTML='<div class="card vazio">A previsão ainda não foi publicada ou não está disponível. Avise quem faz a escala.</div>'}
+})();
+</script>
+</body>
+</html>

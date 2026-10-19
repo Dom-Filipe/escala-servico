@@ -359,7 +359,7 @@ async function freezePast(){
 async function mutate(fn,okMsg){
   if(!state.canWrite){toast('Você tem acesso só de leitura a esta escala.');return false}
   if(state.busy)return false;state.busy=true;
-  try{await freezePast();await fn();if(okMsg)toast(okMsg);return true}
+  try{await freezePast();await fn();if(okMsg)toast(okMsg);agendarPublicacao();return true}
   catch(e){console.error(e);const c=e&&e.code;
     if(c==='invalid_argument'){state.canWrite=false;toast('Não foi possível salvar: seu acesso é só de leitura.')}
     else if(c==='quota_exceeded')toast('Limite de armazenamento atingido. Remova afastamentos antigos.');
@@ -719,6 +719,10 @@ function viewAjustes(){
     <p class="small muted" style="margin:6px 0 12px">Quem faz a escala continua trabalhando na planilha. Exporte a planilha como Excel (.xlsx) e envie aqui: o app lê as abas de guarda (PLGD), cabo de dia, sargento de dia e permanência do comando, mostra o que muda e só grava depois que você confirmar. No iPhone: app Planilhas → ⋮ → Compartilhar e exportar → Enviar uma cópia → Excel.</p>
     ${state.canWrite?'<div class="row"><button class="btn pri" data-act="planArq">Atualizar com a planilha (.xlsx)</button><input type="file" id="pl-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>':''}
     ${Object.keys(state.plan).length?`<p class="hint" style="margin-top:8px">Última atualização: ${ESC_ORDEM.filter(e=>state.plan[e]).map(e=>`${ESC[e].curto} em ${brY(state.plan[e].atualizado)}`).join(' · ')}</p>`:''}</section>
+  ${state.mode==='appwrite'?`<section class="card"><h2>Previsão para o pessoal</h2>
+    <p class="small muted" style="margin:6px 0 10px">Página só de leitura, sem login, com os próximos 45 dias das escalas. Mostra apenas datas e nomes. Atualiza sozinha sempre que você altera a escala ou abre o app.</p>
+    <div class="row"><input class="ctl" id="pub-link" readonly value="${esc(location.origin+location.pathname.replace(/[^/]*$/,'')+'previsao.html')}" style="flex:1;min-width:220px"><button class="btn sm" data-act="copiarLink">Copiar link</button><button class="btn sm" data-act="publicarAgora">Atualizar agora</button></div>
+    ${state.pubOk===false?'<p class="err" style="margin-top:8px">Não consegui publicar. No Appwrite, abra a tabela da escala → Settings → ligue "Row security" e salve.</p>':''}</section>`:''}
   <section class="card"><h2>Backup dos dados</h2>
     <p class="small muted" style="margin:6px 0 12px">Baixe um arquivo com todos os militares, afastamentos, histórico e regras. Use para guardar uma cópia ou para levar os dados para outra versão do sistema (por exemplo, da versão no Claude para a versão no Appwrite).</p>
     <div class="row">${window.ESCALA_DADOS&&state.canWrite?`<button class="btn" data-act="carregarDados">Atualizar com a planilha da Cia${window.ESCALA_DADOS.planilhaData?' ('+br(window.ESCALA_DADOS.planilhaData)+')':''}</button>`:''}<button class="btn" data-act="backup">Baixar backup (JSON)</button>${state.canWrite?'<button class="btn" data-act="importarArq">Importar backup</button><input type="file" id="bk-file" accept=".json,application/json" hidden>':''}</div>
@@ -805,9 +809,11 @@ const actions={
   async backup(){const f=`escala-backup-${today()}.json`;try{await (downloads||downloadsLocal).save({filename:f,data:backupJSON()})}
     catch(e){if(e?.code!=='declined')toast('Não foi possível baixar o backup.')}},
   importarArq:()=>{const i=$('#bk-file');if(i)i.click()},
+  async copiarLink(){const v=$('#pub-link').value;try{await navigator.clipboard.writeText(v);toast('Link copiado')}catch(e){$('#pub-link').select();toast('Selecione e copie o link')}},
+  async publicarAgora(){toast('Publicando…');await publicarPrevisao();render();toast(state.pubOk?'Previsão publicada':'Não foi possível publicar')},
   planArq:()=>{const i=$('#pl-file');if(i)i.click()},
   async aplicarPlan(){const P=dlgData.P;closeDlg();if(!state.canWrite){toast('Acesso só de leitura.');return}
-    state.busy=true;try{await aplicarPlanilha(P);toast('Escalas atualizadas com a planilha da Cia')}catch(e){console.error(e);toast('A atualização parou no meio. Tente de novo.')}finally{state.busy=false;render()}},
+    state.busy=true;try{await aplicarPlanilha(P);toast('Escalas atualizadas com a planilha da Cia');agendarPublicacao()}catch(e){console.error(e);toast('A atualização parou no meio. Tente de novo.')}finally{state.busy=false;render()}},
   async usarPlan(e){const d=e.dataset.d,ids=planDia(ui.esc,d);if(!ids)return;const m=monthKey(ui.esc,d.slice(0,7));
     await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};dias[d]={ids,nomes:ids.map(i=>nome(i)),cor:corDia(d).cor,manual:true,obs:'Planilha da Cia'};await store.setMonth(m,dias)},`${br(d)} igual à planilha`)},
   async usarPlanTodos(){const t=today();const P=state.plan[ui.esc];if(!P)return;
@@ -921,7 +927,7 @@ async function appwriteDb(cfgA){
   const account=new Account(client),dbs=new Databases(client),D=cfgA.databaseId,C=cfgA.collectionId;
   let user=null;try{user=await account.get()}catch(e){}
   if(!user){await telaLogin(account);user=await account.get()}
-  awAccount=account;
+  awAccount=account;const uid=user.$id;
   const cache={},lis={};
   const split=$id=>{const i=$id.indexOf('.');return[$id.slice(0,i),$id.slice(i+1)]};
   const put=d=>{const [col,id]=split(d.$id);let v={};try{v=JSON.parse(d.dados||'{}')}catch(e){}(cache[col]||=new Map()).set(id,v)};
@@ -935,6 +941,11 @@ async function appwriteDb(cfgA){
     const d=ev.payload;if(!d||!d.$id||d.$id.indexOf('.')<0)return;const [col,id]=split(d.$id);
     if(ev.events.some(e=>e.endsWith('.delete')))cache[col]?.delete(id);else put(d);emit(col)});
   const api={
+    /* registro com leitura pública (página previsao.html); exige "Row security" ligado na tabela */
+    async publish(path,data){const [col,id]=path.split('/'),$id=col+'.'+id;const {Permission,Role}=window.Appwrite;
+      const perms=[Permission.read(Role.any()),Permission.update(Role.user(uid)),Permission.delete(Role.user(uid))];
+      const body={col,dados:JSON.stringify(data)};
+      try{await dbs.updateDocument(D,C,$id,body,perms)}catch(e){if(e.code===404)await dbs.createDocument(D,C,$id,body,perms);else throw e}},
     collection:col=>({onSnapshot(next){(lis[col]||=[]).push(next);setTimeout(()=>next(snapOf(col)));return()=>{}}}),
     doc(path){const [col,id]=path.split('/'),$id=col+'.'+id;return{
       async set(data){const body={col,dados:JSON.stringify(data)};
@@ -1056,6 +1067,17 @@ function dlgPlanilha(P){
   <div class="dlg-foot"><span></span><div class="row"><button type="button" class="btn" data-act="fechar">Cancelar</button><button type="button" class="btn pri" data-act="aplicarPlan">Aplicar</button></div></div><div class="err" id="dlg-err"></div>`,{P});
 }
 
+/* ===================== previsão pública (só leitura) ===================== */
+let pubTimer=null;
+function agendarPublicacao(){if(state.mode!=='appwrite'||!db||!db.publish||!state.canWrite)return;clearTimeout(pubTimer);pubTimer=setTimeout(publicarPrevisao,1500)}
+async function publicarPrevisao(){
+  try{const t=today(),fim=addDays(t,45),escalas={};
+    for(const e of ESC_ORDEM){if(!milsEsc(e).length)continue;const sim=simulate(fim,{esc:e});
+      escalas[e]={nome:ESC[e].nome,dias:sim.days.filter(x=>x.d>=t&&!x.folgaDia).map(x=>({d:x.d,c:x.cor,f:x.motivo&&x.motivo.startsWith('Feriado')?x.motivo.replace('Feriado · ',''):null,n:x.ids.map((id,i)=>nomeDia(x,i)),p:x.ov?.obs==='Planilha da Cia'?1:0}))}}
+    await db.publish('publico/previsao',{gerado:new Date().toISOString(),hoje:t,escalas});state.pubOk=true}
+  catch(e){console.error('publicação da previsão',e);state.pubOk=false}
+}
+
 /* ===================== backup ===================== */
 function backupJSON(){const o={sistema:'escala-servico',versao:1,gerado:new Date().toISOString(),config:state.config,militares:{},afastamentos:{},meses:state.meses,planilha:state.plan};
   for(const [id,m] of Object.entries(state.militares)){const {id:_,...r}=m;o.militares[id]=r}
@@ -1079,7 +1101,7 @@ async function importarBackup(txt){
 function loadDemo(){const ex=exemplo(ESC_ORDEM);state.militares=ex.mil;state.afast=ex.af;state.config=ex.config;state.mode='demo';state.loaded=true;render()}
 function subscribe(){
   let pend=5;const first={};
-  const wrap=(k,f)=>snap=>{f(snap);if(!first[k]){first[k]=1;if(--pend===0)state.loaded=true}render()};
+  const wrap=(k,f)=>snap=>{f(snap);if(!first[k]){first[k]=1;if(--pend===0){state.loaded=true;agendarPublicacao()}}render()};
   const onErr=e=>{console.error(e);if(e?.code==='revoked'){toast('O acesso a esta escala foi alterado.')}};
   const toMap=s=>{const o={};s.docs.forEach(d=>o[d.id]={...d.data(),id:d.id});return o};
   db.collection('militares').onSnapshot(wrap('m',s=>{state.militares=toMap(s)}),onErr);

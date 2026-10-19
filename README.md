@@ -21,6 +21,12 @@ PLGD, Cb Dia, Sgt de Dia e Perm Cmdo, mostra um resumo do que muda e, ao confirm
 - guarda a planilha para comparar: a Previsão avisa quando o app e a planilha divergem e oferece "Usar planilha".
 Depois do último dia preenchido, o app sugere pela folga. Na Perm Cmdo, quem está entrando ou saindo de serviço em outra escala (ESV/SSV) fica impedido.
 
+## Previsão para o pessoal (somente leitura)
+`previsao.html` é uma página pública, sem login, com os próximos 45 dias de todas as escalas (só datas e nomes).
+O app do editor publica essa cópia sozinho a cada alteração e ao ser aberto (registro `publico.previsao`, com leitura
+para qualquer pessoa e edição só do editor). Requer **Row security** ligado na tabela do Appwrite.
+O militar digita o nome de guerra e vê os próprios serviços.
+
 ## Abas
 - **Hoje**: serviço do dia em todas as escalas, efetivo, afastados, descanso e alertas.
 - **Previsão**: cartões dia a dia para deslizar, tabela de até 180 dias, destaque de militar e exportação para Excel.
