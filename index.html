@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html,body{overflow-x:hidden}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <script src="config.js"></script>
-<script src="dados-guarda.js"></script>
+<script src="dados-planilha.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/appwrite@16.0.2/dist/iife/sdk.js"></script>
 </head>
 <body>
@@ -65,7 +65,7 @@ main{padding-block:20px 60px;display:grid;gap:20px}
 @media (max-width:640px){.top{position:static}}
 .sd{border-left:6px solid var(--preta-bg)}
 .sd.V{border-left-color:var(--verm)}
-.sd-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,2.2fr);gap:12px;margin-top:10px}
+.sd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:10px}
 @media (max-width:720px){.sd-grid{grid-template-columns:1fr}}
 .sd-col{background:var(--surface-2);border-radius:6px;padding:10px 12px;cursor:pointer;border:1px solid transparent;min-width:0}
 .sd-col.on{border-color:var(--accent)}
@@ -258,13 +258,14 @@ const COR={P:'Escala preta',V:'Escala vermelha'};
 
 /* ===================== estado e armazenamento ===================== */
 const DEFAULT_CFG={porDia:4,descanso:2,inicio:null,feriadosNacionais:true,feriadosIgnorados:[],feriadosExtra:[]};
-const state={militares:{},afast:{},meses:{},config:{},loaded:false,mode:'loading',canWrite:true,busy:false};
+const state={militares:{},afast:{},meses:{},plan:{},config:{},loaded:false,mode:'loading',canWrite:true,busy:false};
 let db=null,downloads=null;
 /* Escalas: cada uma tem seus próprios militares, escalados por dia e histórico; regras e feriados são comuns. */
 const ESC={sgt:{nome:'Sargento de dia',curto:'Sgt de dia',def:1,grad:'3º Sgt',quem:'sargentos'},
            cabo:{nome:'Cabo de dia',curto:'Cb de dia',def:1,grad:'Cb',quem:'cabos'},
-           guarda:{nome:'Guarda',curto:'Guarda',def:4,grad:'Sd',quem:'soldados'}};
-const ESC_ORDEM=['guarda','cabo','sgt'];
+           guarda:{nome:'Guarda',curto:'Guarda',def:4,grad:'Sd',quem:'soldados'},
+           perm:{nome:'Permanência do Comando',curto:'Perm Cmdo',def:1,grad:'Sd',quem:'militares',soUteis:true}};
+const ESC_ORDEM=['guarda','cabo','sgt','perm'];
 const escOf=m=>m.escala&&ESC[m.escala]?m.escala:'guarda';
 const milsEsc=(e)=>Object.values(state.militares).filter(m=>escOf(m)===(e||ui.esc)).sort((a,b)=>(a.ordem||0)-(b.ordem||0));
 const monthKey=(e,m)=>e==='guarda'?m:e+'_'+m;
@@ -274,7 +275,7 @@ function porDiaDe(e,cor,c0){const c=c0||{...DEFAULT_CFG,...state.config};const p
   if(v&&typeof v==='object')v=cor?v[cor]:v.P;return Math.max(1,parseInt(v)||ESC[e].def)}
 function porDiaTxt(e){const p=porDiaDe(e,'P'),v=porDiaDe(e,'V');return p===v?`${p}/dia`:`${p} preta · ${v} verm.`}
 function cfg(e){e=e||(typeof ui!=='undefined'?ui.esc:'guarda');const c={...DEFAULT_CFG,...state.config};if(!c.inicio)c.inicio=today();
-  c.porDia=porDiaDe(e,'P',c);c.porDiaV=porDiaDe(e,'V',c);c.nDia=cor=>cor==='V'?c.porDiaV:c.porDia;c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
+  c.porDia=porDiaDe(e,'P',c);c.porDiaV=porDiaDe(e,'V',c);c.nDia=cor=>cor==='V'?(ESC[e].soUteis?0:c.porDiaV):c.porDia;c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
 const store={
   async setMilitar(id,data){if(db)await db.doc('militares/'+id).set(data);state.militares[id]={...data,id}},
   async delMilitar(id){if(db)await db.doc('militares/'+id).delete();delete state.militares[id]},
@@ -282,6 +283,7 @@ const store={
   async delAfast(id){if(db)await db.doc('afastamentos/'+id).delete();delete state.afast[id]},
   async setConfig(data){if(db)await db.doc('config/geral').set(data);state.config={...data}},
   async setMonth(m,dias){if(db)await db.doc('meses/'+m).set({dias});state.meses[m]={dias}},
+  async setPlan(e,data){if(db)await db.doc('planilha/'+e).set(data);state.plan[e]=data},
 };
 const getOv=(d,e)=>state.meses[monthKey(e||ui.esc,d.slice(0,7))]?.dias?.[d]||null;
 
@@ -299,8 +301,14 @@ function simulate(fim,opt={}){
   const ai=afastIndex();
   const afOn=(id,d)=>(ai[id]||[]).find(a=>a.inicio<=d&&(!a.fim||d<=a.fim));
   const st={},days=[];let before=null,after=null;
+  /* Perm Cmdo: o mesmo militar não pode estar entrando (ESV) nem saindo (SSV) de serviço em outra escala */
+  const outros={};
+  if(mils.some(m=>m.ref)){const refEsc={};for(const m of mils)if(m.ref&&state.militares[m.ref])refEsc[escOf(state.militares[m.ref])]=1;
+    for(const e2 of Object.keys(refEsc))if(e2!==E)for(const x of simulate(addDays(fim,1),{esc:e2}).days)for(const i of x.ids)(outros[i]||=new Set()).add(x.d)}
+  const bloqDe=(m,d)=>{if(!m.ref||!outros[m.ref])return null;if(outros[m.ref].has(d))return 'ESV';if(outros[m.ref].has(addDays(d,-1)))return 'SSV';return null};
   for(let d=c.inicio;d<=fim;d=addDays(d,1)){
     const ov=getOv(d,E),cd=corDia(d),cor=ov?.cor||cd.cor,N=c.nDia(cor);
+    if(ESC[E].soUteis&&cor==='V'){days.push({d,cor,motivo:cd.motivo,ids:[],ov:null,reduced:[],deficit:0,af:{},apr:{},obr:{},pre:null,folgaDia:true});continue}
     const ativos=mils.filter(m=>(!m.entrada||m.entrada<=d)&&(!m.saida||d<m.saida));
     for(const m of ativos)if(!st[m.id])st[m.id]={P:+m.folgaIniP||0,V:+m.folgaIniV||0,last:m.ultimoIni||null};
     const af={},apr={},obr={};const d1=addDays(d,-1),d2=addDays(d,-2);
@@ -309,15 +317,17 @@ function simulate(fim,opt={}){
       if(l.some(x=>x.fim===d1))apr[m.id]=true;                       // dia da apresentação: não concorre
       else if(l.some(x=>x.fim===d2)&&!afOn(m.id,d1))obr[m.id]=true;  // 24 h depois da apresentação: entra de serviço
     }
-    if(opt.before===d)before={st:clone(st),af,apr,obr,ativos,cor};
+    const bq={};for(const m of ativos){if(af[m.id])continue;const b=bloqDe(m,d);if(b)bq[m.id]=b}
+    if(opt.before===d)before={st:clone(st),af,apr,obr,bq,ativos,cor};
+    
     let ids,reduced=[],deficit=0;
     const fixAhead=new Set();for(let k=1;k<=R;k++){const o=getOv(addDays(d,k),E);if(o)(o.ids||[]).forEach(i=>fixAhead.add(i))}
     const descansado=m=>{const l=st[m.id].last;return !l||diff(l,d)>R};
     let pre=null;
-    if(opt.trace){pre={};for(const m of ativos){const s=st[m.id];pre[m.id]={f:s[cor],last:s.last,af:af[m.id]||null,rest:!descansado(m),fix:fixAhead.has(m.id),apr:!!apr[m.id],obr:!!obr[m.id]}}}
+    if(opt.trace){pre={};for(const m of ativos){const s=st[m.id];pre[m.id]={f:s[cor],last:s.last,af:af[m.id]||null,rest:!descansado(m),fix:fixAhead.has(m.id),apr:!!apr[m.id],obr:!!obr[m.id],bq:bq[m.id]||null}}}
     if(ov){ids=(ov.ids||[]).filter(Boolean)}
     else{
-      const disp=ativos.filter(m=>!af[m.id]&&!apr[m.id]&&!fixAhead.has(m.id));
+      const disp=ativos.filter(m=>!af[m.id]&&!apr[m.id]&&!bq[m.id]&&!fixAhead.has(m.id));
       const sc=(a,b)=>{const A=st[a.id],B=st[b.id];if(B[cor]!==A[cor])return B[cor]-A[cor];
         const la=A.last||'',lb=B.last||'';if(la!==lb)return la<lb?-1:1;return (a.ordem||0)-(b.ordem||0)};
       const forc=disp.filter(m=>obr[m.id]).sort(sc).slice(0,N).map(m=>m.id);
@@ -327,7 +337,7 @@ function simulate(fim,opt={}){
     }
     const S=new Set(ids);
     for(const m of ativos){const s=st[m.id];if(S.has(m.id)){s[cor]=0;s.last=d}else s[cor]++}  // folga conta inclusive afastado
-    days.push({d,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,ov,reduced,deficit,af,apr,obr,pre});
+    days.push({d,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,ov,reduced,deficit,af,apr,obr,bq,pre});
     if(opt.after===d)after=clone(st);
   }
   return{days,st,before,after};
@@ -341,7 +351,7 @@ async function freezePast(){
   for(const E of ESC_ORDEM){
     if(!milsEsc(E).length)continue;
     const {days}=simulate(y,{esc:E});const byM={};
-    for(const x of days){if(x.ov)continue;(byM[monthKey(E,x.d.slice(0,7))]||={})[x.d]={ids:x.ids,nomes:x.ids.map(i=>nome(i)),cor:x.cor,auto:true}}
+    for(const x of days){if(x.ov||x.folgaDia)continue;(byM[monthKey(E,x.d.slice(0,7))]||={})[x.d]={ids:x.ids,nomes:x.ids.map(i=>nome(i)),cor:x.cor,auto:true}}
     for(const [m,add] of Object.entries(byM)){const cur=state.meses[m]?.dias||{};await store.setMonth(m,{...cur,...add})}
   }
   if(!state.config.inicio)await store.setConfig({...state.config,inicio:c.inicio});
@@ -411,24 +421,24 @@ function banners(){
   return b;
 }
 function emptyState(){
-  const E=ESC[ui.esc],n={guarda:30,cabo:12,sgt:16}[ui.esc];
+  const E=ESC[ui.esc],n={guarda:30,cabo:12,sgt:16}[ui.esc]||0;
   return `<section class="card empty"><h2>Nenhum militar na escala de ${E.nome.toLowerCase()}</h2>
   <p>Cadastre os ${E.quem} que concorrem a esta escala (${porDiaTxt(ui.esc)}). Você pode colar a lista inteira de uma vez ou começar com ${n} ${E.quem} de exemplo para ver como a escala se comporta.</p>
-  <div class="row">${dadosProntos(ui.esc)?`<button class="btn pri" data-act="carregarDados">Carregar efetivo da ${E.nome.toLowerCase()} (${dadosProntos(ui.esc)} militares)</button>`:''}<button class="btn ${dadosProntos(ui.esc)?'':'pri'}" data-act="importar">Importar lista</button><button class="btn" data-act="addMil">Adicionar um militar</button><button class="btn" data-act="carregarEx">Carregar ${n} de exemplo</button></div></section>`}
+  <div class="row">${dadosProntos(ui.esc)?`<button class="btn pri" data-act="carregarDados">Carregar da planilha da Cia (${dadosProntos(ui.esc)} militares)</button>`:''}<button class="btn ${dadosProntos(ui.esc)?'':'pri'}" data-act="importar">Importar lista</button><button class="btn" data-act="addMil">Adicionar um militar</button>${n?`<button class="btn" data-act="carregarEx">Carregar ${n} de exemplo</button>`:''}</div></section>`}
 /* dados prontos da planilha (arquivo dados-guarda.js, só na versão do GitHub) */
 function dadosProntos(e){const D=window.ESCALA_DADOS;if(!D||!D.militares)return 0;return Object.values(D.militares).filter(m=>(m.escala||'guarda')===e).length}
 /* Cartões "serviço do dia" (todas as escalas) para deslizar na Previsão */
 function cartoesDias(ini,n){
   const fim=addDays(ini,n-1),t=today();
-  const es=['sgt','cabo','guarda'].filter(e=>milsEsc(e).length);
+  const es=['sgt','cabo','perm','guarda'].filter(e=>milsEsc(e).length);
   const maps={};for(const e of es){maps[e]={};for(const x of simulate(fim,{esc:e}).days)if(x.d>=ini)maps[e][x.d]=x}
   let cards='';
   for(let d=ini;d<=fim;d=addDays(d,1)){
     const any=es.map(e=>maps[e][d]).find(Boolean);if(!any)continue;
     const cor=any.cor,dd=parse(d);
-    const blocos=es.map(e=>{const x=maps[e][d];if(!x)return '';
+    const blocos=es.map(e=>{const x=maps[e][d];if(!x||x.folgaDia)return '';const pd=difPlan(e,x);
       const warn=x.deficit||x.reduced.length||x.ov?.manual;
-      return `<div class="sd-col ${ui.esc===e?'on':''}" data-act="editDayEsc" data-e="${e}" data-d="${d}"><span class="eyebrow">${ESC[e].nome}${x.ov?.manual?' · ajustado':''}</span><div class="sd-nms">${x.ids.length?x.ids.map((id,i)=>`<span class="${x.reduced.includes(id)?'reduz':''}">${id===ui.pvM?`<span class="hl">${esc(nomeDia(x,i))}</span>`:esc(nomeDia(x,i))}</span>`).join(''):''}${x.deficit?`<span class="err">faltam ${x.deficit}</span>`:''}</div></div>`}).join('');
+      return `<div class="sd-col ${ui.esc===e?'on':''}" data-act="editDayEsc" data-e="${e}" data-d="${d}"><span class="eyebrow">${ESC[e].nome}${x.ov?.obs==='Planilha da Cia'?' · planilha':x.ov?.manual?' · ajustado':''}</span><div class="sd-nms">${x.ids.length?x.ids.map((id,i)=>`<span class="${x.reduced.includes(id)?'reduz':''}">${id===ui.pvM?`<span class="hl">${esc(nomeDia(x,i))}</span>`:esc(nomeDia(x,i))}</span>`).join(''):''}${x.deficit?`<span class="err">faltam ${x.deficit}</span>`:''}</div>${pd?`<div class="small" style="margin-top:4px;color:var(--warn)">Planilha: ${esc(nomesPlan(pd))}</div>`:''}</div>`}).join('');
     cards+=`<article class="card sd dcard ${cor}" data-d="${d}"><div class="spread"><div><span class="eyebrow">${d===t?'Hoje · ':d===addDays(t,1)?'Amanhã · ':''}${DOWL[dow(d)]}</span><h3 class="dc-date">${pad(dd.getUTCDate())} ${MES[dd.getUTCMonth()]}</h3></div><div style="text-align:right">${chip(cor)}${any.motivo&&any.motivo.startsWith('Feriado')?`<div class="small muted" style="margin-top:4px">${esc(any.motivo.replace('Feriado · ',''))}</div>`:''}</div></div><div class="dc-body">${blocos}</div></article>`;
   }
   return `<section class="carrossel"><div class="spread"><h2>Serviço dia a dia</h2><div class="row"><button class="btn sm" data-act="carMove" data-dir="-1" aria-label="Dia anterior">◂</button><button class="btn sm" data-act="carMove" data-dir="0">Início</button><button class="btn sm" data-act="carMove" data-dir="1" aria-label="Próximo dia">▸</button></div></div>
@@ -437,13 +447,19 @@ function cartoesDias(ini,n){
 }
 function servicoDoDia(){
   const t=today(),c=cfg(),base=t<c.inicio?c.inicio:t;
-  const cols=['sgt','cabo','guarda'].filter(e=>milsEsc(e).length).map(e=>{
-    const day=simulate(base,{esc:e}).days.find(x=>x.d===base);if(!day)return '';
+  const cols=['sgt','cabo','perm','guarda'].filter(e=>milsEsc(e).length).map(e=>{
+    const day=simulate(base,{esc:e}).days.find(x=>x.d===base);if(!day||day.folgaDia)return '';
     return `<div class="sd-col ${ui.esc===e?'on':''}" data-act="setEsc" data-e="${e}"><span class="eyebrow">${ESC[e].nome}</span><div class="sd-nms">${day.ids.length?day.ids.map((id,i)=>`<span>${esc(nomeDia(day,i))}</span>`).join(''):'<span class="err">sem militar</span>'}</div></div>`}).join('');
   if(!cols)return '';
   return `<section class="card sd ${corDia(base).cor}"><div class="spread"><h3>Serviço de ${base===t?'hoje':br(base)} · todas as escalas</h3>${chip(getOv(base)?.cor||corDia(base).cor)}</div><div class="sd-grid">${cols}</div></section>`;
 }
 
+/* ===== Planilha da Cia: o que quem faz a escala publicou, para comparar com o app ===== */
+function planDia(e,d){const p=state.plan[e];return p&&p.dias&&p.dias[d]||null}
+function difPlan(e,x){if(x.folgaDia)return null;const p=planDia(e,x.d);if(!p)return null;
+  return [...x.ids].sort().join()===[...p].sort().join()?null:p}
+function nomesPlan(ids){return ids.map(i=>nome(i)).join(' · ')}
+function difsAte(e,ini,fim){const out=[];if(!state.plan[e])return out;for(const x of simulate(fim,{esc:e}).days)if(x.d>=ini&&difPlan(e,x))out.push(x);return out}
 function chip(cor){return `<span class="chip ${cor}">${COR[cor]}</span>`}
 function situacao(id,sim,t){
   const c=cfg(),b=sim.before;if(!b)return{txt:'—',cls:''};
@@ -484,7 +500,7 @@ function viewHojeEsc(){
   const alertas=sim.days.filter(x=>x.d>=base&&(x.deficit>0||x.reduced.length)).slice(0,8)
     .map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.deficit>0?`<span class="tag bad">faltam ${x.deficit}</span>`:''} ${x.reduced.length?`<span class="tag warn">${x.reduced.length} com descanso reduzido</span>`:''}</span></li>`).join('');
   const proxHtml=prox.map(x=>`<li class="click" data-act="editDay" data-d="${x.d}" style="cursor:pointer"><span class="dt">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${chip(x.cor).replace('Escala ','')}</span>
-    <span class="nms nmlist">${x.ids.map((id,i)=>`<span>${esc(nomeDia(x,i))}</span>`).join('')}${x.deficit?` <span class="tag bad">faltam ${x.deficit}</span>`:''}${x.ov?.manual?' <span class="tag info">ajustado</span>':''}</span></li>`).join('');
+    <span class="nms nmlist">${x.ids.map((id,i)=>`<span>${esc(nomeDia(x,i))}</span>`).join('')}${x.deficit?` <span class="tag bad">faltam ${x.deficit}</span>`:''}${x.ov?.obs==='Planilha da Cia'?' <span class="tag ok">planilha</span>':x.ov?.manual?' <span class="tag info">ajustado</span>':''}</span></li>`).join('');
   const motivo=day.motivo||'Segunda a sexta';
   const bd=parse(base);
   return `<div class="grid-hoje">
@@ -495,8 +511,8 @@ function viewHojeEsc(){
         <div>${chip(day.cor)}<div class="motivo">${esc(motivo)}</div></div>
       </div>
       <ul class="roster">${roster}</ul>
-      <div class="spread" style="margin-top:12px"><span class="hint">Serviço de 24 h · ${day.ov?.manual?'escala ajustada manualmente':day.ov?'escala registrada':'calculada pela folga'}</span>
-      <div class="row"><button class="btn sm" data-act="novoAfast">Registrar afastamento</button><button class="btn sm pri" data-act="editDay" data-d="${base}">Trocar militar</button></div></div>
+      <div class="spread" style="margin-top:12px"><span class="hint">Serviço de 24 h · ${day.ov?.obs==='Planilha da Cia'?'conforme a planilha da Cia':day.ov?.manual?'escala ajustada manualmente':day.ov?'escala registrada':'calculada pela folga'}</span>
+      <div class="row">${state.canWrite?'<button class="btn sm" data-act="planArq">Atualizar com a planilha</button><input type="file" id="pl-file" accept=".xlsx,.xls" hidden>':''}<button class="btn sm" data-act="novoAfast">Registrar afastamento</button><button class="btn sm pri" data-act="editDay" data-d="${base}">Trocar militar</button></div></div>
     </section>
     <section class="card"><div class="spread"><h3>Próximos 7 dias</h3><a class="link" href="#previsao">Previsão completa</a></div><ul class="days" style="margin-top:8px">${proxHtml}</ul></section>
   </div>
@@ -507,6 +523,7 @@ function viewHojeEsc(){
     </section>
     <section class="card"><h3>Afastados hoje</h3>${afList?`<ul class="plain">${afList}</ul>`:'<p class="small muted">Ninguém afastado.</p>'}</section>
     <section class="card"><h3>Em descanso</h3>${desc.length?`<ul class="plain">${desc.map(m=>`<li><span>${esc(nome(m.id))}</span><span class="small muted">serviço em ${br(b.st[m.id].last)}</span></li>`).join('')}</ul>`:'<p class="small muted">Ninguém em descanso obrigatório.</p>'}</section>
+    ${(()=>{const df=difsAte(ui.esc,t,addDays(t,14));return state.plan[ui.esc]?`<section class="card"><h3>Planilha da Cia</h3>${df.length?`<p class="small" style="margin:8px 0">${df.length} dia(s) nos próximos 14 dias com militares diferentes da planilha: ${df.slice(0,5).map(x=>br(x.d)).join(', ')}${df.length>5?'…':''}.</p><a class="link" href="#previsao">Ver e resolver na previsão</a>`:'<p class="small muted">App e planilha iguais nos próximos 14 dias.</p>'}</section>`:''})()}
     <section class="card"><h3>Alertas · 60 dias</h3>${alertas?`<ul class="plain">${alertas}</ul>`:'<p class="small muted">Sem falta de efetivo nem descanso reduzido nos próximos 60 dias.</p>'}</section>
   </div></div>`;
 }
@@ -526,14 +543,16 @@ function viewPrevisao(){
   for(const x of days){
     if(dow(x.d)===1||x===days[0])rows+=`<tr class="week"><td colspan="4">Semana de ${br(x.d)}</td></tr>`;
     const nms=x.ids.map((id,i)=>{const n=esc(nomeDia(x,i));const r=x.reduced.includes(id);return `<span class="${r?'reduz':''}">${id===hl?`<span class="hl">${n}</span>`:n}</span>`}).join('');
-    const flags=[x.deficit?`<span class="tag bad">faltam ${x.deficit}</span>`:'',x.reduced.length?'<span class="tag warn">descanso reduzido</span>':'',x.ov?.manual?'<span class="tag info">ajustado</span>':'',x.d<t?'<span class="tag">histórico</span>':'',x.d===t?'<span class="tag ok">hoje</span>':''].join(' ');
+    const flags=[x.deficit?`<span class="tag bad">faltam ${x.deficit}</span>`:'',x.reduced.length?'<span class="tag warn">descanso reduzido</span>':'',x.ov?.obs==='Planilha da Cia'?'<span class="tag ok">planilha</span>':x.ov?.manual?'<span class="tag info">ajustado</span>':'',x.d<t?'<span class="tag">histórico</span>':'',x.d===t?'<span class="tag ok">hoje</span>':'',x.folgaDia?'<span class="tag">sem Perm Cmdo</span>':''].join(' ')+(()=>{const pd=difPlan(ui.esc,x);if(pd)return `<div class="small" style="margin-top:4px"><span class="tag warn">Planilha: ${esc(nomesPlan(pd))}</span> ${state.canWrite?`<button class="btn sm" data-act="usarPlan" data-d="${x.d}">Usar planilha</button>`:''}</div>`;return planDia(ui.esc,x.d)&&!x.folgaDia?' <span class="tag ok">= planilha</span>':''})();
     rows+=`<tr class="click ${x.cor==='V'?'fds':''}" data-act="editDay" data-d="${x.d}"><td class="mono" style="white-space:nowrap">${DOW[dow(x.d)]} ${br(x.d)}</td><td>${chip(x.cor).replace('Escala ','')}${x.motivo&&x.motivo.startsWith('Feriado')?`<div class="small muted">${esc(x.motivo.replace('Feriado · ',''))}</div>`:''}</td><td class="nmlist" style="min-width:16rem">${nms}</td><td>${flags}</td></tr>`;
   }
   // distribuição
   const cont={};for(const x of days)for(const id of x.ids){(cont[id]||={P:0,V:0})[x.cor]++}
   const dist=mils.filter(m=>(!m.saida||m.saida>ini)&&(!m.entrada||m.entrada<=fim)).map(m=>{const k=cont[m.id]||{P:0,V:0};
     return `<tr><td class="num mono">${m.ordem}</td><td>${m.id===hl?`<span class="hl">${esc(nome(m.id))}</span>`:esc(nome(m.id))}</td><td class="num mono">${k.P}</td><td class="num mono">${k.V}</td><td class="num mono"><b>${k.P+k.V}</b></td></tr>`}).join('');
-  return cartoesDias(ini,Math.min(ui.pvH,90))+`<section class="card">
+  const P=state.plan[ui.esc];const difs=P?days.filter(x=>x.d>=t&&difPlan(ui.esc,x)):[];
+  const banPlan=P?`<div class="banner" style="background:${difs.length?'var(--warn-soft)':'var(--accent-soft)'}"><span><b>Planilha da Cia</b> (atualizada em ${brY(P.atualizado||'')}, preenchida até ${br(P.horizonte||'')}): ${difs.length?`${difs.length} dia(s) em que o app sugere militares diferentes da planilha. A planilha vale para os dias já publicados; o app sugere os seguintes.`:'o app está igual à planilha em todos os dias preenchidos.'}</span>${difs.length&&state.canWrite?'<button class="btn sm" data-act="usarPlanTodos">Usar a planilha nesses dias</button>':''}</div>`:'';
+  return banPlan+cartoesDias(ini,Math.min(ui.pvH,90))+`<section class="card">
     <div class="spread"><h2>Previsão · ${ESC[ui.esc].nome}</h2><div class="row">${downloads?'<button class="btn sm" data-act="csv">Baixar planilha (CSV)</button>':''}<button class="btn sm" data-act="copiar">Copiar tabela</button></div></div>
     <p class="small muted" style="margin:6px 0 12px">Calculada pela folga atual, com afastamentos e feriados já lançados. Muda sozinha quando alguém entra ou sai. Clique num dia para trocar militares.</p>
     <div class="controls">
@@ -575,9 +594,10 @@ function quadroDados(){
     for(const id of x.ids){const q=p[id];if(!q){prob.push(nome(id)+' não está na escala nesse dia');continue}
       if(q.af)prob.push(`${nome(id)} escalado durante ${q.af.tipo.toLowerCase()}`);
       if(q.rest)prob.push(`${nome(id)} com menos de ${c.descanso*24} h de descanso (serviço em ${br(q.last)})`);
-      if(q.apr)prob.push(`${nome(id)} escalado no dia da apresentação`)}
+      if(q.apr)prob.push(`${nome(id)} escalado no dia da apresentação`);
+      if(q.bq)prob.push(`${nome(id)} está ${q.bq==='ESV'?'entrando':'saindo'} de serviço em outra escala`)}
     for(const [id,q] of Object.entries(p))if(q.obr&&!x.ids.includes(id))prob.push(`${nome(id)} deveria entrar de serviço 24 h após a apresentação`);
-    const eleg=Object.entries(p).filter(([id,q])=>!q.af&&!q.rest&&!q.fix&&!q.apr&&!q.obr);
+    const eleg=Object.entries(p).filter(([id,q])=>!q.af&&!q.rest&&!q.fix&&!q.apr&&!q.obr&&!q.bq);
     const fora=eleg.filter(([id])=>!x.ids.includes(id)),dentro=x.ids.map(id=>p[id]).filter(q=>q&&!q.af&&!q.rest&&!q.obr&&!q.apr);
     if(fora.length&&dentro.length){const maxF=Math.max(...fora.map(([,q])=>q.f)),minD=Math.min(...dentro.map(q=>q.f));
       if(maxF>minD){const quem=fora.filter(([,q])=>q.f>minD).map(([id,q])=>`${nome(id)} (${q.f})`);prob.push(`Fora da ordem de folga: ficou de fora ${quem.join(', ')}, mais folgado que quem entrou (${minD})`)}}
@@ -596,9 +616,10 @@ function viewQuadro(){
     const cells=days.map(x=>{const q=x.pre?.[m.id];
       if(!q)return '<td class="fora"></td>';
       const inS=x.ids.includes(m.id);
-      if(inS){const v=q.af||q.rest||q.apr;return `<td class="s ${x.cor} ${v?'viol':''}" title="${esc(`Serviço ${x.cor==='P'?'preto':'vermelho'} · folga ${q.f}${q.obr?' · retorno de afastamento':''}${q.rest?' · descanso insuficiente':''}${q.af?' · afastado':''}${q.apr?' · dia da apresentação':''}`)}">S</td>`}
+      if(inS){const v=q.af||q.rest||q.apr||q.bq;return `<td class="s ${x.cor} ${v?'viol':''}" title="${esc(`Serviço ${x.cor==='P'?'preto':'vermelho'} · folga ${q.f}${q.obr?' · retorno de afastamento':''}${q.rest?' · descanso insuficiente':''}${q.af?' · afastado':''}${q.apr?' · dia da apresentação':''}`)}">S</td>`}
       if(q.af)return `<td class="af" title="${esc(q.af.tipo+' · folga '+q.f)}">${AFCOD[q.af.tipo]||'AF'}</td>`;
       if(q.apr)return `<td class="apr" title="${esc('Apresentação · folga '+q.f)}">AP</td>`;
+      if(q.bq)return `<td class="apr" title="${esc((q.bq==='ESV'?'Entrando de serviço':'Saindo de serviço')+' em outra escala · folga '+q.f)}">${q.bq==='ESV'?'ES':'SS'}</td>`;
       if(q.obr)return `<td class="af viol" title="Deveria estar de serviço">${q.f}</td>`;
       return `<td class="${q.rest?'rest':''}" title="${esc(`Folga ${x.cor==='P'?'preta':'vermelha'}: ${q.f}${q.rest?' · em descanso':''}`)}">${q.f}</td>`}).join('');
     const k=tot[m.id]||{P:0,V:0};
@@ -614,7 +635,7 @@ function viewQuadro(){
     <p class="small muted" style="margin:6px 0 0">Cada linha é um militar e cada coluna é um dia. O número é a folga na cor daquele dia (preta ou vermelha), antes da escala do dia. Em cada coluna, os marcados com <b>S</b> (${c.porDia===c.porDiaV?c.porDia:c.porDia+' na preta e '+c.porDiaV+' na vermelha'}) precisam ter as maiores folgas entre os disponíveis. A linha <b>Conferência</b> refaz essa verificação dia a dia.</p>
     <div class="banner" style="margin-top:12px;background:${probs.length?'var(--verm-soft)':'var(--accent-soft)'}"><span>${probs.length?`<b>${probs.length} dia(s) com problema neste mês.</b> Passe o mouse ou toque no <b>!</b> da linha Conferência para ver o motivo, ou clique no dia para corrigir.`:`<b>Mês conferido:</b> ${days.length} dias, todos com o efetivo completo, descanso de ${c.descanso*24} h respeitado e escala na ordem de folga.`}</span></div>
     ${probs.length?`<ul class="plain small" style="margin-top:8px">${probs.map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.prob.map(esc).join('<br>')}</span></li>`).join('')}</ul>`:''}
-    <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> apresentação (serviço no dia seguinte)</span><span><span class="qk viol s P">S</span> erro</span></div>
+    <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> apresentação (serviço no dia seguinte)</span><span><span class="qk apr">ES</span>/<span class="qk apr">SS</span> entrando/saindo de serviço em outra escala</span><span><span class="qk viol s P">S</span> erro</span></div>
     <div class="q-wrap"><table class="q">
       <thead><tr><th class="nm corner" rowspan="2">Militar</th>${head1}<th class="sum" rowspan="2" title="Serviços pretos">P</th><th class="sum" rowspan="2" title="Serviços vermelhos">V</th><th class="sum" rowspan="2">Tot</th></tr><tr>${head2}</tr></thead>
       <tbody>${rows}</tbody>
@@ -680,7 +701,7 @@ function viewAjustes(){
   const ign=c.feriadosIgnorados||[];
   return `<section class="card"><h2>Regras da escala</h2>
     <div class="fgrid" style="margin-top:12px">
-      ${ESC_ORDEM.map(e=>`<label class="f">${ESC[e].nome}: escalados na preta<input type="number" id="cf-por-${e}" min="1" max="20" value="${porDiaDe(e,'P')}"></label><label class="f">${ESC[e].nome}: escalados na vermelha<input type="number" id="cf-porv-${e}" min="1" max="20" value="${porDiaDe(e,'V')}"></label>`).join('')}
+      ${ESC_ORDEM.map(e=>`<label class="f">${ESC[e].nome}: escalados na preta<input type="number" id="cf-por-${e}" min="1" max="20" value="${porDiaDe(e,'P')}"></label>${ESC[e].soUteis?`<input type="hidden" id="cf-porv-${e}" value="${porDiaDe(e,'P')}">`:`<label class="f">${ESC[e].nome}: escalados na vermelha<input type="number" id="cf-porv-${e}" min="1" max="20" value="${porDiaDe(e,'V')}"></label>`}`).join('')}
       <label class="f">Dias de descanso após o serviço<input type="number" id="cf-desc" min="0" max="7" value="${c.descanso}"><span class="hint">2 dias = 48 h. Quem tira sexta não pega sábado nem domingo.</span></label>
       <label class="f">Início da contagem<input type="date" id="cf-ini" value="${c.inicio}"><span class="hint">Data a partir da qual valem as folgas iniciais.</span></label>
     </div>
@@ -694,9 +715,13 @@ function viewAjustes(){
     </tbody></table></div>
     <div class="controls" style="margin-top:12px"><label class="f">Data<input type="date" id="fe-d"></label><label class="f" style="min-width:220px">Nome<input type="text" id="fe-n" placeholder="Ex.: Aniversário de Praia Grande"></label><button class="btn" data-act="addFer">Adicionar feriado</button></div>
   </section>
+  <section class="card"><h2>Planilha da Cia</h2>
+    <p class="small muted" style="margin:6px 0 12px">Quem faz a escala continua trabalhando na planilha. Exporte a planilha como Excel (.xlsx) e envie aqui: o app lê as abas de guarda (PLGD), cabo de dia, sargento de dia e permanência do comando, mostra o que muda e só grava depois que você confirmar. No iPhone: app Planilhas → ⋮ → Compartilhar e exportar → Enviar uma cópia → Excel.</p>
+    ${state.canWrite?'<div class="row"><button class="btn pri" data-act="planArq">Atualizar com a planilha (.xlsx)</button><input type="file" id="pl-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>':''}
+    ${Object.keys(state.plan).length?`<p class="hint" style="margin-top:8px">Última atualização: ${ESC_ORDEM.filter(e=>state.plan[e]).map(e=>`${ESC[e].curto} em ${brY(state.plan[e].atualizado)}`).join(' · ')}</p>`:''}</section>
   <section class="card"><h2>Backup dos dados</h2>
     <p class="small muted" style="margin:6px 0 12px">Baixe um arquivo com todos os militares, afastamentos, histórico e regras. Use para guardar uma cópia ou para levar os dados para outra versão do sistema (por exemplo, da versão no Claude para a versão no Appwrite).</p>
-    <div class="row">${window.ESCALA_DADOS&&state.canWrite?'<button class="btn" data-act="carregarDados">Carregar efetivo da planilha</button>':''}<button class="btn" data-act="backup">Baixar backup (JSON)</button>${state.canWrite?'<button class="btn" data-act="importarArq">Importar backup</button><input type="file" id="bk-file" accept=".json,application/json" hidden>':''}</div>
+    <div class="row">${window.ESCALA_DADOS&&state.canWrite?`<button class="btn" data-act="carregarDados">Atualizar com a planilha da Cia${window.ESCALA_DADOS.planilhaData?' ('+br(window.ESCALA_DADOS.planilhaData)+')':''}</button>`:''}<button class="btn" data-act="backup">Baixar backup (JSON)</button>${state.canWrite?'<button class="btn" data-act="importarArq">Importar backup</button><input type="file" id="bk-file" accept=".json,application/json" hidden>':''}</div>
     <p class="hint" style="margin-top:8px">Importar grava por cima dos registros com o mesmo identificador e mantém os demais.</p></section>
   <section class="card"><h2>Como a escala é montada</h2><ol class="small" style="margin:8px 0 0;padding-left:1.2rem;display:grid;gap:4px;max-width:70ch">
     <li>Sábado, domingo e feriado são <b>escala vermelha</b>; os demais dias são <b>escala preta</b>. Cada cor tem uma folga separada.</li>
@@ -751,14 +776,14 @@ function dlgAfast(id,milId){
 }
 function dlgDay(d){
   const c=cfg();if(d<c.inicio){toast('Esse dia é anterior ao início da contagem.');return}
-  const sim=simulate(addDays(d,c.descanso+1),{before:d});const day=sim.days.find(x=>x.d===d),b=sim.before;if(!day||!b)return;
+  const sim=simulate(addDays(d,c.descanso+1),{before:d});const day=sim.days.find(x=>x.d===d),b=sim.before;if(day&&day.folgaDia){toast(ESC[ui.esc].nome+' não tem serviço em fim de semana e feriado.');return}if(!day||!b)return;
   const R=c.descanso;
   const info=m=>{const s=b.st[m.id],a=b.af[m.id];const l=s.last;const rest=l&&diff(l,d)<=R;
     const fut=sim.days.find(x=>x.d>d&&x.d<=addDays(d,R)&&x.ids.includes(m.id));
-    return{m,f:s[day.cor],a,rest,fut,l,apr:b.apr[m.id],obr:b.obr[m.id]}};
+    return{m,f:s[day.cor],a,rest,fut,l,apr:b.apr[m.id],obr:b.obr[m.id],bq:b.bq[m.id]}};
   const cands=b.ativos.map(info).sort((x,y)=>(!!y.obr-!!x.obr)||(!!x.a-!!y.a)||(!!x.apr-!!y.apr)||(!!x.rest-!!y.rest)||(y.f-x.f));
   const N=Math.max(c.nDia(day.cor),day.ids.length);
-  const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
+  const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.bq?(k.bq==='ESV'?' · entrando de serviço em outra escala':' · saindo de serviço em outra escala'):''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
     return `<option value="${k.m.id}" ${cur===k.m.id?'selected':''} ${k.a&&cur!==k.m.id?'disabled':''}>${esc(lab)}</option>`}).join('');
   const slots=Array.from({length:N},(_,i)=>`<div class="slot"><span class="n">${i+1}</span><select class="ctl" id="dd-s${i}">${opt(day.ids[i]||'')}</select></div>`).join('');
   const dd=parse(d);
@@ -780,6 +805,15 @@ const actions={
   async backup(){const f=`escala-backup-${today()}.json`;try{await (downloads||downloadsLocal).save({filename:f,data:backupJSON()})}
     catch(e){if(e?.code!=='declined')toast('Não foi possível baixar o backup.')}},
   importarArq:()=>{const i=$('#bk-file');if(i)i.click()},
+  planArq:()=>{const i=$('#pl-file');if(i)i.click()},
+  async aplicarPlan(){const P=dlgData.P;closeDlg();if(!state.canWrite){toast('Acesso só de leitura.');return}
+    state.busy=true;try{await aplicarPlanilha(P);toast('Escalas atualizadas com a planilha da Cia')}catch(e){console.error(e);toast('A atualização parou no meio. Tente de novo.')}finally{state.busy=false;render()}},
+  async usarPlan(e){const d=e.dataset.d,ids=planDia(ui.esc,d);if(!ids)return;const m=monthKey(ui.esc,d.slice(0,7));
+    await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};dias[d]={ids,nomes:ids.map(i=>nome(i)),cor:corDia(d).cor,manual:true,obs:'Planilha da Cia'};await store.setMonth(m,dias)},`${br(d)} igual à planilha`)},
+  async usarPlanTodos(){const t=today();const P=state.plan[ui.esc];if(!P)return;
+    await mutate(async()=>{const sim=simulate(P.horizonte||addDays(t,60),{esc:ui.esc});const byM={};
+      for(const x of sim.days){if(x.d<t||x.folgaDia)continue;const pd=planDia(ui.esc,x.d);if(!pd)continue;(byM[monthKey(ui.esc,x.d.slice(0,7))]||={})[x.d]={ids:pd,nomes:pd.map(i=>nome(i)),cor:x.cor,manual:true,obs:'Planilha da Cia'}}
+      for(const [m,add] of Object.entries(byM))await store.setMonth(m,{...(state.meses[m]?.dias||{}),...add})},'Dias ajustados conforme a planilha')},
   async carregarDados(e){if(!window.ESCALA_DADOS)return;if(state.busy)return;e.disabled=true;e.textContent='Carregando…';await importarBackup(JSON.stringify(window.ESCALA_DADOS))},
   editDayEsc:e=>{if(ui.esc!==e.dataset.e){ui.esc=e.dataset.e;saveUi();render();setTimeout(()=>dlgDay(e.dataset.d),30)}else dlgDay(e.dataset.d)},
   carMove:e=>{const tr=$('#car-track');if(!tr)return;const c=tr.querySelector('.dcard');const w=c?c.getBoundingClientRect().width+12:300;const dir=+e.dataset.dir;
@@ -853,6 +887,8 @@ document.addEventListener('change',e=>{const id=e.target.id;
   else if(id==='pv-h'){ui.pvH=+e.target.value;saveUi();render()}
   else if(id==='pv-m'){ui.pvM=e.target.value;saveUi();render()}
   else if(id==='af-tipo'){ui.afTipo=e.target.value;render()}
+  else if(id==='pl-file'){const f=e.target.files&&e.target.files[0];if(!f)return;e.target.value='';
+    (async()=>{try{toast('Lendo a planilha…');const X=await carregarXLSX();const P=lerPlanilha(X,await f.arrayBuffer());dlgPlanilha(P)}catch(err){console.error(err);toast('Não consegui ler esse arquivo. Exporte a planilha como Excel (.xlsx).')}})()}
   else if(id==='bk-file'){const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>importarBackup(String(r.result));r.readAsText(f)}});
 window.addEventListener('hashchange',render);
 dlg.addEventListener('close',()=>{dlgKind=null});
@@ -912,8 +948,116 @@ async function appwriteDb(cfgA){
 let awAccount=null;
 const downloadsLocal={async save({filename,data}){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'text/plain;charset=utf-8'}));a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);return{status:'saved'}}};
 
+/* ===================== leitura da planilha da Cia (.xlsx) =====================
+   Abas lidas: PLGD (guarda), Cb Dia, Sgt de Dia, Perm Cmdo. Adjunto e oficial de dia são ignorados.
+   Em cada célula de dia: número = folga naquela cor; 0, PL ou GDA = serviço; "n - ESV/SSV" = impedido por outra escala; vazio = fora. */
+const ABAS=[{esc:'guarda',aba:/^PL\s*\/?\s*GD/i,pref:'g'},{esc:'cabo',aba:/^Cb\s*Dia/i,pref:'c_'},{esc:'sgt',aba:/^Sgt\s*de\s*Dia/i,pref:'s'},{esc:'perm',aba:/^Perm/i,pref:'p'}];
+const normN=s=>String(s||'').normalize('NFKD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/[^A-Z]/g,'').replace(/(.)\1+/g,'$1');
+const limpaNome=n=>String(n).replace(/\s*\/\s*\d+.*$/,'').replace(/\s+20\d\d$/,'').replace(/\s*\/?\s*CFC\s*$/i,'').trim();
+function celula(v){
+  if(v==null||v==='')return['X'];
+  if(typeof v==='number')return v===0?['S']:['F',Math.round(v)];
+  const s=String(v).trim().toUpperCase();
+  if(['PL','GDA','GD','CB','SV'].includes(s))return['S'];
+  let m=s.match(/^(\d+)\s*-\s*(ESV|SSV)/);if(m)return['B',+m[1]];
+  if(/^\d+$/.test(s))return +s===0?['S']:['F',+s];
+  return['X'];
+}
+let xlsxLib=null;
+async function carregarXLSX(){if(window.XLSX)return window.XLSX;if(xlsxLib)return xlsxLib;
+  xlsxLib=new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';sc.onload=()=>res(window.XLSX);sc.onerror=()=>rej(new Error('Não foi possível carregar o leitor de planilhas.'));document.head.appendChild(sc)});return xlsxLib}
+function lerPlanilha(XLSX,buf){
+  const wb=XLSX.read(buf,{type:'array',cellDates:true});const HOJE=today();
+  const ymdL=d0=>{const d=new Date(d0.getTime()+12*3600e3);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`};
+  const out={militares:{},afastamentos:{},planilha:{},hoje:{},horizonte:{},avisos:[]};
+  const porNome={};
+  for(const A of ABAS){
+    const nomeAba=wb.SheetNames.find(n=>A.aba.test(n.trim()));if(!nomeAba){out.avisos.push(`Aba de ${ESC[A.esc].nome} não encontrada`);continue}
+    const ws=wb.Sheets[nomeAba];const rng=XLSX.utils.decode_range(ws['!ref']);
+    const val=(r,c)=>{const x=ws[XLSX.utils.encode_cell({r,c})];return x?(x.v instanceof Date?x.v:x.v):null};
+    // cabeçalho (linha 2): colunas de nome/grad/antiguidade e blocos de datas
+    const H=1;let cNome=-1,cGrad=-1,cAnt=-1,cOrd=-1,cSit=-1,cEsc=-1;const blocos=[];let atual=null;
+    for(let c=0;c<=rng.e.c;c++){const v=val(H,c);
+      if(v instanceof Date){const d=ymdL(v);if(atual&&addDays(atual.fim,1)===d){atual.fim=d;atual.cols[d]=c}else{atual={ini:d,fim:d,cols:{[d]:c}};blocos.push(atual)}}
+      else{atual=null;const t=normN(v);if(t==='NOMECOMPLETO')cNome=c;else if(t==='PGRAD')cGrad=c;else if(t==='ANTG')cAnt=c;else if(t==='NORD')cOrd=c;else if(t==='SITUACAO')cSit=c;else if(t==='ESCALA')cEsc=c}}
+    // se houver mais de um bloco de datas, usa o que tem serviço lançado em mais dias recentes
+    const candidatos=blocos.filter(b=>b.ini<=HOJE&&b.fim>=HOJE);
+    const nota=b=>{let n=0;for(let d=addDays(HOJE,-14);d<=HOJE;d=addDays(d,1)){const c=b.cols[d];if(c==null)continue;for(let r=H+1;r<=rng.e.r;r++)if(celula(val(r,c))[0]==='S'){n++;break}}return n};
+    const bl=candidatos.sort((a,b)=>nota(a)-nota(b)).pop();
+    if(cNome<0||!bl){out.avisos.push(`${ESC[A.esc].nome}: não achei o nome ou o dia de hoje na aba "${nomeAba}"`);continue}
+    const linhas=[];
+    for(let r=H+1;r<=rng.e.r;r++){const n=val(r,cNome);if(!n||!String(n).trim())continue;
+      const g={};for(const [d,c] of Object.entries(bl.cols))g[d]=celula(val(r,c));linhas.push({r,n:String(n),g})}
+    const hz=Object.keys(bl.cols).filter(d=>linhas.some(l=>l.g[d][0]!=='X')).sort().pop()||HOJE;out.horizonte[A.esc]=hz;
+    const soU=!!ESC[A.esc].soUteis;const corD=d=>corDia(d).cor;
+    const plan={};let ordem=0;
+    for(const L of linhas){
+      if(A.esc==='guarda'&&cEsc>=0&&normN(val(L.r,cEsc))==='CBDIA')continue; // está na escala de cabo de dia
+      const ant=cAnt>=0?val(L.r,cAnt):null,ord=cOrd>=0?val(L.r,cOrd):null;
+      if(A.esc==='guarda'&&ant==null)continue;
+      const nome=limpaNome(L.n);ordem++;
+      const id=A.esc==='guarda'?'g'+Math.round(ant):A.esc==='sgt'?'s'+Math.round(ord??ordem):A.esc==='perm'?'p'+Math.round(ant??ordem):'c_'+normN(nome).toLowerCase().slice(0,20);
+      // folga atual: valor de hoje (preta) menos 1, ou o último valor da cor antes de hoje
+      const ultimo=cor=>{for(let d=addDays(HOJE,-1);d>=addDays(HOJE,-60);d=addDays(d,-1)){if(corD(d)!==cor||(soU&&cor==='V'))continue;const k=L.g[d];if(!k)continue;if(k[0]==='S')return 0;if(k[0]==='F'||k[0]==='B')return k[1]}return null};
+      let fp=ultimo('P'),fv=soU?0:ultimo('V');const kh=L.g[HOJE]||['X'];
+      if(corD(HOJE)==='P'&&(kh[0]==='F'||kh[0]==='B'))fp=Math.max(0,kh[1]-1);
+      if(corD(HOJE)==='V'&&!soU&&(kh[0]==='F'||kh[0]==='B'))fv=Math.max(0,kh[1]-1);
+      let ult=null;for(let d=addDays(HOJE,-1);d>=addDays(HOJE,-6);d=addDays(d,-1))if(L.g[d]&&L.g[d][0]==='S'){ult=d;break}
+      const m={escala:A.esc,ordem,grad:cGrad>=0?(val(L.r,cGrad)||ESC[A.esc].grad):ESC[A.esc].grad,nome,entrada:HOJE,saida:null,folgaIniP:fp||0,folgaIniV:fv||0,ultimoIni:ult,exemplo:false};
+      if(ant!=null)m.antiguidade=Math.round(ant);
+      if(A.esc==='perm'){const k=normN(nome);const ref=porNome[k]||Object.entries(porNome).find(([n])=>k.length>=6&&n.startsWith(k.slice(0,6)))?.[1];m.ref=ref||null}
+      else if(!porNome[normN(nome)])porNome[normN(nome)]=id;
+      out.militares[id]=m;
+      // fora da escala a partir de hoje (até o último dia preenchido)
+      let ini=null,last=null,i=0;const sit=cSit>=0?String(val(L.r,cSit)||''):'';
+      const fecha=fim=>{if(ini&&!(fim==null&&ini>addDays(hz,-4)&&ini>HOJE))out.afastamentos[`pl_${id}_${i++}`]={militarId:id,tipo:/f[eé]rias/i.test(sit)?'Férias':(/sa[uú]de|baixad/i.test(sit)?'Saúde':'Outro'),inicio:ini,fim,obs:'Fora da escala na planilha da Cia'};ini=null};
+      for(let d=HOJE;d<=hz;d=addDays(d,1)){if(soU&&corD(d)==='V')continue;const k=(L.g[d]||['X'])[0];if(k==='X'){if(!ini)ini=d;last=d}else if(ini)fecha(last)}
+      if(ini)fecha(null);
+      for(const [d,k] of Object.entries(L.g))if(d>=HOJE&&k[0]==='S')(plan[d]||=[]).push(id);
+    }
+    out.hoje[A.esc]=plan[HOJE]||[];out.planilha[A.esc]=plan;
+  }
+  return out;
+}
+/* compara com o que o app tem e aplica: dias publicados viram fixos; folgas recalibradas a partir de hoje */
+function resumoPlanilha(P){
+  const t=today(),linhas=[];
+  for(const A of ABAS){const e=A.esc;if(!P.planilha[e])continue;
+    const novos=Object.entries(P.militares).filter(([id,m])=>m.escala===e&&!state.militares[id]).map(([,m])=>m.nome);
+    const fora=Object.values(P.afastamentos).filter(a=>P.militares[a.militarId]?.escala===e&&a.inicio<=t).map(a=>P.militares[a.militarId].nome);
+    let mud=0;if(milsEsc(e).length){const sim=simulate(P.horizonte[e],{esc:e});for(const x of sim.days){const pd=P.planilha[e][x.d];if(!pd||x.d<t||x.folgaDia)continue;if([...x.ids].sort().join()!==[...pd].sort().join())mud++}}
+    else mud=Object.keys(P.planilha[e]).length;
+    linhas.push({e,n:Object.values(P.militares).filter(m=>m.escala===e).length,dias:Object.keys(P.planilha[e]).length,mud,novos,fora,hz:P.horizonte[e],hoje:(P.planilha[e][t]||[]).map(i=>P.militares[i].nome)})}
+  return linhas;
+}
+async function aplicarPlanilha(P){
+  const t=today();
+  const cfgN={...DEFAULT_CFG,...state.config,inicio:t,porDiaEscala:{guarda:{P:3,V:6},cabo:1,sgt:1,perm:1,...(state.config.porDiaEscala||{})}};
+  if(!cfgN.porDiaEscala.perm)cfgN.porDiaEscala.perm=1;
+  await store.setConfig(cfgN);
+  for(const [id,m] of Object.entries(P.militares)){const {id:_x,...antes}=state.militares[id]||{};await store.setMilitar(id,{...antes,...m})}
+  for(const [id,a] of Object.entries(state.afast))if(/^(pl_|saude_)/.test(id))await store.delAfast(id);
+  for(const [id,a] of Object.entries(P.afastamentos))await store.setAfast(id,a);
+  const byM={};
+  for(const [e,plan] of Object.entries(P.planilha))for(const [d,ids] of Object.entries(plan))
+    (byM[monthKey(e,d.slice(0,7))]||={})[d]={ids,nomes:ids.map(i=>`${P.militares[i].grad||''} ${P.militares[i].nome}`.trim()),cor:corDia(d).cor,manual:true,obs:'Planilha da Cia'};
+  for(const [k,add] of Object.entries(byM)){const cur=state.meses[k]?.dias||{};const keep={};for(const [d,v] of Object.entries(cur))if(d>=t&&v.obs!=='Planilha da Cia')keep[d]=v;await store.setMonth(k,{...keep,...add})}
+  for(const [e,plan] of Object.entries(P.planilha))await store.setPlan(e,{dias:plan,atualizado:t,horizonte:P.horizonte[e]});
+}
+function dlgPlanilha(P){
+  const L=resumoPlanilha(P);
+  openDlg('plan',`<h2>Atualizar com a planilha da Cia</h2>
+  ${P.avisos.length?`<p class="err">${P.avisos.map(esc).join('<br>')}</p>`:''}
+  <div class="tbl-wrap"><table><thead><tr><th>Escala</th><th class="num">Militares</th><th>Hoje</th><th class="num">Dias publicados</th><th class="num">Dias que mudam</th></tr></thead><tbody>
+  ${L.map(l=>`<tr><td><b>${ESC[l.e].nome}</b><div class="small muted">até ${br(l.hz)}</div></td><td class="num">${l.n}</td><td class="small">${esc(l.hoje.join(', ')||'—')}</td><td class="num">${l.dias}</td><td class="num">${l.mud}</td></tr>
+    ${l.novos.length?`<tr><td colspan="5" class="small">Novos: ${esc(l.novos.join(', '))}</td></tr>`:''}${l.fora.length?`<tr><td colspan="5" class="small muted">Fora da escala hoje: ${esc(l.fora.join(', '))}</td></tr>`:''}`).join('')}
+  </tbody></table></div>
+  <p class="hint">Os dias já preenchidos na planilha ficam fixos no app, e as folgas passam a contar a partir de hoje com os números da planilha. Depois do último dia preenchido, o app continua sugerindo pela folga. Ajustes que você fez à mão depois desse dia são mantidos.</p>
+  <div class="dlg-foot"><span></span><div class="row"><button type="button" class="btn" data-act="fechar">Cancelar</button><button type="button" class="btn pri" data-act="aplicarPlan">Aplicar</button></div></div><div class="err" id="dlg-err"></div>`,{P});
+}
+
 /* ===================== backup ===================== */
-function backupJSON(){const o={sistema:'escala-servico',versao:1,gerado:new Date().toISOString(),config:state.config,militares:{},afastamentos:{},meses:state.meses};
+function backupJSON(){const o={sistema:'escala-servico',versao:1,gerado:new Date().toISOString(),config:state.config,militares:{},afastamentos:{},meses:state.meses,planilha:state.plan};
   for(const [id,m] of Object.entries(state.militares)){const {id:_,...r}=m;o.militares[id]=r}
   for(const [id,a] of Object.entries(state.afast)){const {id:_,...r}=a;o.afastamentos[id]=r}
   return JSON.stringify(o,null,1)}
@@ -926,6 +1070,7 @@ async function importarBackup(txt){
     for(const [id,m] of Object.entries(o.militares||{})){await store.setMilitar(id,m);n++}
     for(const [id,a] of Object.entries(o.afastamentos||{})){await store.setAfast(id,a);n++}
     for(const [k,v] of Object.entries(o.meses||{})){await store.setMonth(k,v.dias||{});n++}
+    for(const [k,v] of Object.entries(o.planilha||{})){await store.setPlan(k,v);n++}
     toast(`Backup importado: ${n} registros.`)}
   catch(e){console.error(e);toast(`Importação parou depois de ${n} registros. Tente de novo.`)}
   finally{state.busy=false;render()}}
@@ -933,13 +1078,14 @@ async function importarBackup(txt){
 /* ===================== inicialização ===================== */
 function loadDemo(){const ex=exemplo(ESC_ORDEM);state.militares=ex.mil;state.afast=ex.af;state.config=ex.config;state.mode='demo';state.loaded=true;render()}
 function subscribe(){
-  let pend=4;const first={};
+  let pend=5;const first={};
   const wrap=(k,f)=>snap=>{f(snap);if(!first[k]){first[k]=1;if(--pend===0)state.loaded=true}render()};
   const onErr=e=>{console.error(e);if(e?.code==='revoked'){toast('O acesso a esta escala foi alterado.')}};
   const toMap=s=>{const o={};s.docs.forEach(d=>o[d.id]={...d.data(),id:d.id});return o};
   db.collection('militares').onSnapshot(wrap('m',s=>{state.militares=toMap(s)}),onErr);
   db.collection('afastamentos').onSnapshot(wrap('a',s=>{state.afast=toMap(s)}),onErr);
   db.collection('meses').onSnapshot(wrap('x',s=>{const o={};s.docs.forEach(d=>o[d.id]=d.data());state.meses=o}),onErr);
+  db.collection('planilha').onSnapshot(wrap('p',s=>{const o={};s.docs.forEach(d=>o[d.id]=d.data());state.plan=o}),onErr);
   db.doc('config/geral').onSnapshot(wrap('c',s=>{state.config=s.exists?{...s.data()}:{}}),onErr);
 }
 render();

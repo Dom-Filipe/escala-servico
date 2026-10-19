@@ -1,7 +1,7 @@
 # Escala de Serviço 24h
 
 Sistema web para montar e conferir as escalas de serviço de 24 horas:
-**Guarda** (soldados, 4 por dia), **Cabo de dia** e **Sargento de dia** (1 por dia cada).
+**Guarda** (soldados, 3 na preta e 6 na vermelha), **Cabo de dia**, **Sargento de dia** e **Permanência do Comando** (1 por dia; a Perm Cmdo só em dias úteis).
 
 ## Regras implementadas
 - **Escala preta** (segunda a sexta) e **escala vermelha** (sábado, domingo e feriados), cada uma com folga própria.
@@ -11,6 +11,15 @@ Sistema web para montar e conferir as escalas de serviço de 24 horas:
   No dia seguinte ao fim do afastamento ele se **apresenta** e, 24 h depois, **entra de serviço**.
 - Feriados nacionais calculados automaticamente (inclui Carnaval, Sexta-feira Santa e Corpus Christi) e feriados locais cadastráveis.
 - Dias passados ficam gravados no histórico; trocas manuais são respeitadas e o restante se recalcula.
+
+## Trabalho junto com a planilha da Cia
+Quem faz a escala continua na planilha do Google. Em **Ajustes → Atualizar com a planilha (.xlsx)** o app lê as abas
+PLGD, Cb Dia, Sgt de Dia e Perm Cmdo, mostra um resumo do que muda e, ao confirmar:
+- fixa os dias já publicados na planilha;
+- recalibra as folgas a partir do dia (a planilha também conta missões e outros serviços);
+- marca como fora da escala quem está em branco na planilha;
+- guarda a planilha para comparar: a Previsão avisa quando o app e a planilha divergem e oferece "Usar planilha".
+Depois do último dia preenchido, o app sugere pela folga. Na Perm Cmdo, quem está entrando ou saindo de serviço em outra escala (ESV/SSV) fica impedido.
 
 ## Abas
 - **Hoje**: serviço do dia em todas as escalas, efetivo, afastados, descanso e alertas.
