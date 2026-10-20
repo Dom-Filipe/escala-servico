@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/app-apple.png">
+<meta name="theme-color" content="#3d5a2a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Escala">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html,body{overflow-x:hidden}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <script src="config.js"></script>
 <script src="dados-planilha.js"></script>
@@ -425,8 +432,14 @@ function draw(){
   const trNew=$('#car-track');if(trNew&&ui.carScroll)trNew.scrollLeft=ui.carScroll;
   if(focusId){const el=document.getElementById(focusId);if(el&&el.tagName!=='BUTTON')el.focus()}
 }
+/* instalar como app (só na versão do site, não aqui no Claude) */
+let promptInst=null;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();promptInst=e;render()});
+const appInstalado=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+function bannerInstalar(){let fechado=false;try{fechado=localStorage.getItem('escala-dica-inst')==='1'}catch(e){}
+  if(state.mode!=='appwrite'||appInstalado()||fechado)return '';const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  return `<div class="banner" style="background:var(--accent-soft)"><span>${promptInst?'Instale a escala no celular para abrir pelo ícone, em tela cheia.':ios?'Para abrir pelo ícone: toque em <b>Compartilhar</b> e depois em <b>Adicionar à Tela de Início</b>.':'Para abrir pelo ícone: menu do navegador → <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.'}</span><span class="row">${promptInst?'<button class="btn sm pri" data-act="instalar">Instalar</button>':''}<button class="btn sm" data-act="fecharInst">Ok</button></span></div>`}
 function banners(){
-  let b='';
+  let b=bannerInstalar();
   if(state.mode==='demo')b+=`<div class="banner"><span><b>Modo demonstração.</b> Nesta visualização os dados não são salvos. Abra a página publicada para guardar a escala.</span></div>`;
   const ex=ui.tab!=='afastamentos'&&milsEsc().filter(m=>m.exemplo).length;
   if(ex)b+=`<div class="banner"><span>Os ${ex} ${ESC[ui.esc].quem} da escala de ${ESC[ui.esc].nome.toLowerCase()} são <b>exemplos</b>. Troque pelos nomes reais em <a href="#militares">Militares</a> (editar um a um ou importar a lista inteira).</span></div>`;
@@ -842,6 +855,8 @@ const actions={
   async backup(){const f=`escala-backup-${today()}.json`;try{await (downloads||downloadsLocal).save({filename:f,data:backupJSON()})}
     catch(e){if(e?.code!=='declined')toast('Não foi possível baixar o backup.')}},
   importarArq:()=>{const i=$('#bk-file');if(i)i.click()},
+  async instalar(){if(!promptInst)return;promptInst.prompt();await promptInst.userChoice;promptInst=null;render()},
+  fecharInst:()=>{try{localStorage.setItem('escala-dica-inst','1')}catch(e){}render()},
   novaEscala:()=>dlgEscala(null), editEscala:e=>dlgEscala(e.dataset.e),
   async delEscala(e){const id=dlgData.e;if(milsEsc(id).length){$('#dlg-err').textContent=`Remova ou mude de escala os ${milsEsc(id).length} militares antes de excluir.`;return}
     if(e.dataset.ok!=='1'){e.dataset.ok='1';e.textContent='Confirmar exclusão';return}
@@ -1179,5 +1194,6 @@ render();
 })();
 </script>
 
+<script>if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"))navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
 </body>
 </html>

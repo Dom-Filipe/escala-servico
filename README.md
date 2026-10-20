@@ -27,6 +27,12 @@ O app do editor publica essa cópia sozinho a cada alteração e ao ser aberto (
 para qualquer pessoa e edição só do editor). Requer **Row security** ligado na tabela do Appwrite.
 O militar digita o nome de guerra e vê os próprios serviços.
 
+## Instalar no celular
+O app (`index.html`) e a previsão (`previsao.html`) são instaláveis, cada um com seu ícone
+(verde para o escalante, escuro para a tropa). No iPhone: Safari → Compartilhar → Adicionar à Tela de Início.
+No Android: Chrome → Instalar app. Abrem em tela cheia e funcionam sem internet com os últimos dados vistos
+(`sw.js`, rede primeiro; dados do Appwrite nunca ficam em cache).
+
 ## Criar escalas
 Em **Ajustes → Escalas → Nova escala** o sargenteante cria um novo posto ou função (ex.: motorista de dia):
 nome, quantos entram na preta e na vermelha, e se é só em dias úteis. A escala nova ganha previsão, quadro,

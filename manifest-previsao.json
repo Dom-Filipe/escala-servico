@@ -1,0 +1,17 @@
+{
+  "id": "./previsao.html",
+  "name": "Previsão da Escala",
+  "short_name": "Previsão",
+  "description": "Previsão da escala de serviço, somente leitura.",
+  "lang": "pt-BR",
+  "start_url": "./previsao.html",
+  "scope": "./previsao.html",
+  "display": "standalone",
+  "background_color": "#111410",
+  "theme_color": "#111410",
+  "icons": [
+    {"src": "icons/prev-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icons/prev-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icons/prev-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
