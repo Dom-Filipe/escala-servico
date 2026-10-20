@@ -103,7 +103,8 @@ function render(){
   const bd=document.getElementById('bt-dica');if(bd)bd.onclick=()=>{try{localStorage.setItem('prev-dica','1')}catch(e){}render()};
   document.querySelectorAll('.filtros button').forEach(bt=>bt.addEventListener('click',()=>{filtro=bt.dataset.f;salvar();render()}));
 }
-(async()=>{
+let ultimaCarga=0;
+async function carregar(){ultimaCarga=Date.now();
   const A=window.ESCALA_CONFIG&&window.ESCALA_CONFIG.appwrite;
   try{
     if(!A||!window.Appwrite)throw new Error('config');
@@ -115,9 +116,14 @@ function render(){
     render();
   }catch(e){console.error(e);document.getElementById('atual').textContent='';
     const c=e&&e.code;const motivo=c===404?'ainda não publicada':c===401?'leitura pública bloqueada (ligar Row security na tabela)':(e&&e.message)||'sem conexão';
-    document.getElementById('main').innerHTML=`<div class="card vazio">A previsão ainda não está disponível. Avise quem faz a escala.<div class="small" style="margin-top:8px">Motivo: ${esc(motivo)}</div></div>`}
-})();
-if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('sw.js').catch(()=>{});
+    if(!dados)document.getElementById('main').innerHTML=`<div class="card vazio">A previsão ainda não está disponível. Avise quem faz a escala.<div class="small" style="margin-top:8px">Motivo: ${esc(motivo)}</div></div>`}
+}
+carregar();
+// ao voltar para a página (app instalado fica aberto em segundo plano), busca a previsão de novo
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-ultimaCarga>60000)carregar()});
+if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost')){const tinha=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then(r=>document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')r.update().catch(()=>{})})).catch(()=>{});
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(tinha)location.reload()})}
 </script>
 </body>
 </html>
