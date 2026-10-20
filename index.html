@@ -275,6 +275,7 @@ const ESC={sgt:{nome:'Sargento de dia',curto:'Sgt de dia',def:1,grad:'3º Sgt',q
            guarda:{nome:'Guarda',curto:'Guarda',def:4,grad:'Sd',quem:'soldados'},
            perm:{nome:'Permanência do Comando',curto:'Perm Cmdo',def:1,grad:'Sd',quem:'militares',soUteis:true,emenda:true}};
 const ESC_BASE=Object.keys(ESC);
+const NOME_PADRAO={};for(const [k,v] of Object.entries(ESC))NOME_PADRAO[k]={nome:v.nome,curto:v.curto};
 const ESC_ORDEM=['guarda','cabo','sgt','perm'];
 /* escalas criadas pelo sargenteante ficam em config.escalasExtra */
 function rebuildEsc(){
@@ -283,11 +284,14 @@ function rebuildEsc(){
   ESC_ORDEM.length=0;ESC_ORDEM.push('guarda','cabo','sgt','perm');
   for(const x of (state.config.escalasExtra||[])){if(!x||!x.id||ESC_BASE.includes(x.id))continue;
     ESC[x.id]={nome:x.nome,curto:x.curto||x.nome,def:Math.max(1,+x.P||1),grad:x.grad||'Sd',quem:x.quem||'militares',soUteis:!!x.soUteis,emenda:!!(x.soUteis&&x.emenda),extra:true,inicio:x.inicio||null};ESC_ORDEM.push(x.id)}
+  // nomes editados pelo usuário (escalas padrão, oficial de dia e adjunto)
+  const nm=state.config.nomesEscala||{};
+  for(const k of [...ESC_BASE,...EXT_ORDEM]){const alvo=ESC_BASE.includes(k)?ESC[k]:EXT[k],pad0=NOME_PADRAO[k];alvo.nome=nm[k]?.nome||pad0.nome;alvo.curto=nm[k]?.curto||nm[k]?.nome||pad0.curto}
   if(typeof ui!=='undefined'&&!ESC[ui.esc])ui.esc='guarda';
 }
 /* Oficial de dia e adjunto: a Cia não escala, só registra quando alguém dela é escalado (aparece na previsão) */
 const EXT={ofd:{nome:'Oficial de Dia',curto:'Of Dia'},adj:{nome:'Adjunto ao Oficial de Dia',curto:'Adj Of Dia'}};
-const EXT_ORDEM=['ofd','adj'];
+const EXT_ORDEM=['ofd','adj'];for(const [k,v] of Object.entries(EXT))NOME_PADRAO[k]={nome:v.nome,curto:v.curto};
 const extKey=m=>'ext_'+m;
 const extDia=d=>state.meses[extKey(d.slice(0,7))]?.dias?.[d]||null;
 function extServ(){const k='ext|'+stateVer;if(simCache.has(k))return simCache.get(k);const sv={};
@@ -788,6 +792,7 @@ function viewAjustes(){
     <p class="small muted" style="margin:6px 0 10px">Cada escala tem seus próprios militares, folgas e histórico. As regras de descanso, afastamento e feriados valem para todas.</p>
     <div class="tbl-wrap"><table><thead><tr><th>Escala</th><th class="num">Preta</th><th class="num">Vermelha</th><th class="num">Militares</th><th></th></tr></thead><tbody>
     ${ESC_ORDEM.map(e=>`<tr><td><b>${esc(ESC[e].nome)}</b>${ESC[e].extra?' <span class="tag">criada</span>':''}${ESC[e].soUteis?`<div class="small muted">${ESC[e].emenda?'quem tira o dia útil antes segue no fim de semana/feriado':'só dias úteis'}</div>`:''}</td><td class="num mono">${porDiaDe(e,'P')}</td><td class="num mono">${ESC[e].soUteis?(ESC[e].emenda?'emenda':'—'):porDiaDe(e,'V')}</td><td class="num mono">${milsEsc(e).length}</td><td>${state.canWrite?`<button class="btn sm" data-act="editEscala" data-e="${e}">Editar</button>`:''}</td></tr>`).join('')}
+    ${EXT_ORDEM.map(e=>`<tr><td><b>${esc(EXT[e].nome)}</b><div class="small muted">só registro: aparece na previsão quando alguém da Cia é escalado</div></td><td class="num mono">—</td><td class="num mono">—</td><td class="num mono">—</td><td>${state.canWrite?`<button class="btn sm" data-act="editEscExt" data-e="${e}">Editar</button>`:''}</td></tr>`).join('')}
     </tbody></table></div></section>
   <section class="card"><h2>Feriados (escala vermelha)</h2>
     <p class="small muted" style="margin:6px 0 10px">Os feriados nacionais são calculados sozinhos, inclusive Carnaval e Corpus Christi. Desmarque os que a sua OM não considera. Acrescente os feriados municipais e estaduais abaixo.</p>
@@ -829,7 +834,8 @@ const GRADS=['Sd','Sd EV','Cb','3º Sgt','2º Sgt','1º Sgt','ST','Asp','2º Ten
 function dlgEscala(e){
   const x=e?ESC[e]:null;const base=e&&ESC_BASE.includes(e);
   openDlg('esc',`<h2>${x?'Editar escala':'Nova escala'}</h2>
-  ${base?`<p class="hint">Escala padrão: dá para mudar quantos entram por dia. O nome fica fixo.</p>`:`<div class="fgrid"><label class="f">Nome da escala<input id="es-nome" value="${esc(x?.nome||'')}" placeholder="Ex.: Motorista de dia" required></label>
+  ${base?`<div class="fgrid"><label class="f">Nome da escala<input id="es-nome" value="${esc(x.nome)}" placeholder="${esc(NOME_PADRAO[e].nome)}" required></label>
+  <label class="f">Nome curto<input id="es-curto" value="${esc(x.curto)}" placeholder="${esc(NOME_PADRAO[e].curto)}"></label></div><p class="hint">Nome original: ${esc(NOME_PADRAO[e].nome)}. Apague o campo para voltar a ele.</p>`:`<div class="fgrid"><label class="f">Nome da escala<input id="es-nome" value="${esc(x?.nome||'')}" placeholder="Ex.: Motorista de dia" required></label>
   <label class="f">Nome curto<input id="es-curto" value="${esc(x?.curto||'')}" placeholder="Ex.: Mot dia"></label></div>
   <div class="fgrid"><label class="f">Quem concorre (no plural)<input id="es-quem" value="${esc(x?.quem||'militares')}" placeholder="soldados, cabos, motoristas…"></label>
   <label class="f">Posto/grad. padrão<input id="es-grad" list="grads" value="${esc(x?.grad||'Sd')}"></label></div>
@@ -878,6 +884,10 @@ function dlgAfast(id,milId){
   <label class="f">Data de apresentação<input type="date" id="af-f" value="${a?.fim?addDays(a.fim,1):''}"><span class="hint">Nesse dia não é escalado; no dia seguinte já pode entrar de serviço. Em branco = ainda sem data.</span></label></div>
   <label class="f">Observação<input id="af-o" value="${esc(a?.obs||'')}" placeholder="Ex.: BI nº 190, atestado de 5 dias"></label>
   ${foot(a?'<button type="button" class="btn danger" data-act="delAfast">Excluir</button>':'')}`,{id});
+}
+function dlgEscExt(e){const x=EXT[e];
+  openDlg('escext',`<h2>Editar nome</h2><div class="fgrid"><label class="f">Nome<input id="ee-nome" value="${esc(x.nome)}" placeholder="${esc(NOME_PADRAO[e].nome)}"></label>
+  <label class="f">Nome curto<input id="ee-curto" value="${esc(x.curto)}" placeholder="${esc(NOME_PADRAO[e].curto)}"></label></div><p class="hint">Nome original: ${esc(NOME_PADRAO[e].nome)}. Apague o campo para voltar a ele.</p>${foot()}`,{e});
 }
 function dlgExt(d){
   const xd=extDia(d)||{};const todos=Object.values(state.militares).sort((a,b)=>nome(a.id).localeCompare(nome(b.id)));
@@ -936,6 +946,7 @@ const actions={
       for(const x of sim.days){if(x.d<t||x.folgaDia)continue;const pd=planDia(ui.esc,x.d);if(!pd)continue;(byM[monthKey(ui.esc,x.d.slice(0,7))]||={})[x.d]={ids:pd,nomes:pd.map(i=>nome(i)),cor:x.cor,manual:true,obs:'Planilha da Cia'}}
       for(const [m,add] of Object.entries(byM))await store.setMonth(m,{...(state.meses[m]?.dias||{}),...add})},'Dias ajustados conforme a planilha')},
   async carregarDados(e){if(!window.ESCALA_DADOS)return;if(state.busy)return;e.disabled=true;e.textContent='Carregando…';await importarBackup(JSON.stringify(window.ESCALA_DADOS))},
+  editEscExt:e=>dlgEscExt(e.dataset.e),
   editExt:e=>{if(state.canWrite)dlgExt(e.dataset.d)},
   editDayEsc:e=>{if(ui.esc!==e.dataset.e){ui.esc=e.dataset.e;saveUi();render();setTimeout(()=>dlgDay(e.dataset.d),30)}else dlgDay(e.dataset.d)},
   carMove:e=>{const tr=$('#car-track');if(!tr)return;const c=tr.querySelector('.dcard');const w=c?c.getBoundingClientRect().width+12:300;const dir=+e.dataset.dir;
@@ -999,6 +1010,10 @@ async function submitDlg(){
     const ids=[];for(let i=0;i<dlgData.N;i++){const v=$('#dd-s'+i).value;if(v){if(ids.includes(v))return fail(nome(v)+' aparece duas vezes.');ids.push(v)}}
     const {d,cor}=dlgData,m=monthKey(ui.esc,d.slice(0,7)),obs=$('#dd-o').value.trim();closeDlg();
     await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};dias[d]={ids,nomes:ids.map(i=>nome(i)),cor,manual:true,obs};await store.setMonth(m,dias)},`Escala de ${br(d)} ajustada`);
+  }else if(dlgKind==='escext'){
+    const e=dlgData.e,c={...state.config},nm={...(c.nomesEscala||{})},n=$('#ee-nome').value.trim(),cu=$('#ee-curto').value.trim();
+    if((!n||n===NOME_PADRAO[e].nome)&&(!cu||cu===NOME_PADRAO[e].curto))delete nm[e];else nm[e]={nome:n||NOME_PADRAO[e].nome,curto:cu||n||NOME_PADRAO[e].curto};c.nomesEscala=nm;
+    closeDlg();await mutate(()=>store.setConfig(c),'Nome atualizado');
   }else if(dlgKind==='ext'){
     const d=dlgData.d,mk=extKey(d.slice(0,7)),o={};
     for(const e of EXT_ORDEM){const n=$('#ex-'+e).value.trim();if(!n)continue;const m=Object.values(state.militares).find(m=>normN(nome(m.id))===normN(n));o[e]=m?{n:nome(m.id),id:m.id}:{n}}
@@ -1014,6 +1029,8 @@ async function submitDlg(){
       const reg={id,inicio:(e0&&ESC[e0]?.inicio)||today(),nome:nomeE,curto:$('#es-curto').value.trim()||nomeE,quem:$('#es-quem').value.trim()||'militares',grad:$('#es-grad').value.trim()||'Sd',soUteis:uteis,emenda:uteis&&!!$('#es-emenda')?.checked,P,V};
       extras=extras.filter(x=>x.id!==id).concat(reg)}
     pe[id]=P===V?P:{P,V};c.porDiaEscala=pe;
+    if(base){const nm={...(c.nomesEscala||{})},n=$('#es-nome').value.trim(),cu=$('#es-curto').value.trim();
+      if((!n||n===NOME_PADRAO[e0].nome)&&(!cu||cu===NOME_PADRAO[e0].curto))delete nm[e0];else nm[e0]={nome:n||NOME_PADRAO[e0].nome,curto:cu||n||NOME_PADRAO[e0].curto};c.nomesEscala=nm}
     if(e0){const de={...DEFAULT_CFG.descansoEntre,...(c.descansoEntre||{})};for(const o of ESC_ORDEM){const el=$('#es-de-'+o);if(!el)continue;const v=+el.value,R0=cfg().descanso;for(const k of [e0+'>'+o,o+'>'+e0]){if(v===R0&&DEFAULT_CFG.descansoEntre[k]==null)delete de[k];else de[k]=v}}c.descansoEntre=de}c.escalasExtra=extras;if(!c.inicio)c.inicio=cfg().inicio;
     closeDlg();await mutate(()=>store.setConfig(c),e0?'Escala atualizada':'Escala criada');
     if(!e0){ui.esc=id;saveUi();location.hash='#militares';render()}
