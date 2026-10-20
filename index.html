@@ -341,8 +341,7 @@ function simulate(fim,opt={}){
     const af={},apr={},obr={};const d1=addDays(d,-1),d2=addDays(d,-2);
     for(const m of ativos){const a=afOn(m.id,d);if(a){af[m.id]=a;continue}
       const l=ai[m.id]||[];
-      if(l.some(x=>x.fim===d1))apr[m.id]=true;                       // dia da apresentação: não concorre
-      else if(l.some(x=>x.fim===d2)&&!afOn(m.id,d1))obr[m.id]=true;  // 24 h depois da apresentação: entra de serviço
+      if(l.some(x=>x.fim===d1))apr[m.id]=true;   // dia da apresentação: não concorre; no dia seguinte volta a concorrer pela folga
     }
     const bq={};for(const m of ativos){if(af[m.id])continue;const b=bloqDe(m,d);if(b)bq[m.id]=b}
     /* emenda: quem tira o último dia útil continua nos dias vermelhos seguintes (sexta → sábado → domingo) */
@@ -524,9 +523,9 @@ function situacao(id,sim,t){
   const c=cfg(),b=sim.before;if(!b)return{txt:'—',cls:''};
   const m=state.militares[id];if(m.entrada&&m.entrada>t)return{txt:'Entra em '+br(m.entrada),cls:'info'};
   if(m.saida&&t>=m.saida)return{txt:'Fora da escala',cls:'info'};
-  const a=b.af[id];if(a)return{txt:`${a.tipo}${a.fim?' até '+br(a.fim):' · sem retorno'}`,cls:'bad'};
+  const a=b.af[id];if(a)return{txt:`${a.tipo}${a.fim?' · apresenta-se '+br(addDays(a.fim,1)):' · sem data de apresentação'}`,cls:'bad'};
   const hoje=sim.days.find(x=>x.d===t);if(hoje&&hoje.ids.includes(id))return{txt:b.obr[id]?'De serviço hoje (retorno)':'De serviço hoje',cls:'ok'};
-  if(b.apr[id])return{txt:'Apresentação hoje · serviço amanhã',cls:'ok'};
+  if(b.apr[id])return{txt:'Apresentação hoje · a partir de amanhã concorre pela folga',cls:'ok'};
   const l=b.st[id]?.last;if(l&&diff(l,t)<=c.descanso)return{txt:'Descanso (serviço '+br(l)+')',cls:'warn'};
   return{txt:'Disponível',cls:''};
 }
@@ -555,7 +554,7 @@ function viewHojeEsc(){
   const desc=b.ativos.filter(m=>!b.af[m.id]&&b.st[m.id].last&&diff(b.st[m.id].last,base)<=c.descanso&&!day.ids.includes(m.id));
   const disp=ativos-afast;
   const nHoje=c.nDia(day.cor);const folgaPrev=disp>0?Math.max(0,disp/nHoje-1):0;
-  const afList=b.ativos.filter(m=>b.af[m.id]).map(m=>{const a=b.af[m.id];return `<li><span>${esc(nome(m.id))}</span><span class="tag bad">${esc(a.tipo)}${a.fim?' até '+br(a.fim):''}</span></li>`}).join('');
+  const afList=b.ativos.filter(m=>b.af[m.id]).map(m=>{const a=b.af[m.id];return `<li><span>${esc(nome(m.id))}</span><span class="tag bad">${esc(a.tipo)}${a.fim?' · apresenta-se '+br(addDays(a.fim,1)):''}</span></li>`}).join('');
   const alertas=sim.days.filter(x=>x.d>=base&&(x.deficit>0||x.reduced.length)).slice(0,8)
     .map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.deficit>0?`<span class="tag bad">faltam ${x.deficit}</span>`:''} ${x.reduced.length?`<span class="tag warn">${x.reduced.length} com descanso reduzido</span>`:''}</span></li>`).join('');
   const proxHtml=prox.map(x=>`<li class="click" data-act="editDay" data-d="${x.d}" style="cursor:pointer"><span class="dt">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${chip(x.cor).replace('Escala ','')}</span>
@@ -695,7 +694,7 @@ function viewQuadro(){
     <p class="small muted" style="margin:6px 0 0">Cada linha é um militar e cada coluna é um dia. O número é a folga na cor daquele dia (preta ou vermelha), antes da escala do dia. Em cada coluna, os marcados com <b>S</b> (${c.porDia===c.porDiaV?c.porDia:c.porDia+' na preta e '+c.porDiaV+' na vermelha'}) precisam ter as maiores folgas entre os disponíveis. A linha <b>Conferência</b> refaz essa verificação dia a dia.</p>
     <div class="banner" style="margin-top:12px;background:${probs.length?'var(--verm-soft)':'var(--accent-soft)'}"><span>${probs.length?`<b>${probs.length} dia(s) com problema ${per}.</b> Passe o mouse ou toque no <b>!</b> da linha Conferência para ver o motivo, ou clique no dia para corrigir.`:`<b>${rol?"Período conferido":"Mês conferido"}:</b> ${days.length} dias, todos com o efetivo completo, descanso de ${c.descanso*24} h respeitado e escala na ordem de folga.`}</span></div>
     ${probs.length?`<ul class="plain small" style="margin-top:8px">${probs.map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.prob.map(esc).join('<br>')}</span></li>`).join('')}</ul>`:''}
-    <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> apresentação (serviço no dia seguinte)</span><span><span class="qk apr">ES</span>/<span class="qk apr">SS</span>/<span class="qk apr">PS</span> de serviço em outra escala no dia, logo antes ou logo depois</span><span><span class="qk viol s P">S</span> erro</span></div>
+    <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> dia da apresentação (pronto no dia seguinte)</span><span><span class="qk apr">ES</span>/<span class="qk apr">SS</span>/<span class="qk apr">PS</span> de serviço em outra escala no dia, logo antes ou logo depois</span><span><span class="qk viol s P">S</span> erro</span></div>
     <div class="q-wrap"><table class="q">
       <thead><tr><th class="nm corner" rowspan="2">Militar</th>${head1}<th class="sum" rowspan="2" title="Serviços pretos">P</th><th class="sum" rowspan="2" title="Serviços vermelhos">V</th><th class="sum" rowspan="2">Tot</th></tr><tr>${head2}</tr></thead>
       <tbody>${rows}</tbody>
@@ -742,13 +741,13 @@ function viewAfast(){
   const em=all.filter(a=>a.inicio<=t&&(!a.fim||a.fim>=t)),fut=all.filter(a=>a.inicio>t).reverse(),fim=all.filter(a=>a.fim&&a.fim<t).slice(0,30);
   const dias=a=>a.fim?diff(a.inicio,a.fim)+1:null;
   const row=(a,ativo)=>`<tr><td><b>${esc(nome(a.militarId))}</b><div class="small muted">${state.militares[a.militarId]?escNome(escOf(state.militares[a.militarId])):''}</div></td><td><span class="tag ${a.tipo==='Saúde'?'bad':a.tipo==='Férias'?'ok':'info'}">${esc(a.tipo)}</span></td>
-    <td class="mono small" style="white-space:nowrap">${br(a.inicio)} → ${a.fim?br(a.fim):'sem data'}</td><td class="num mono">${dias(a)??'—'}</td><td class="small muted">${esc(a.obs||'')}</td>
-    <td style="white-space:nowrap"><button class="btn sm" data-act="editAfast" data-id="${a.id}">Editar</button>${ativo?` <button class="btn sm" data-act="retorno" data-id="${a.id}">Retornou hoje</button>`:''}</td></tr>`;
+    <td class="mono small" style="white-space:nowrap">${br(a.inicio)} → apres. ${a.fim?br(addDays(a.fim,1)):'sem data'}</td><td class="num mono">${dias(a)??'—'}</td><td class="small muted">${esc(a.obs||'')}</td>
+    <td style="white-space:nowrap"><button class="btn sm" data-act="editAfast" data-id="${a.id}">Editar</button>${ativo?` <button class="btn sm" data-act="retorno" data-id="${a.id}">Apresentou-se hoje</button>`:''}</td></tr>`;
   const tbl=(lst,ativo,vazio)=>lst.length?`<div class="tbl-wrap"><table><thead><tr><th>Militar</th><th>Motivo</th><th>Período</th><th class="num">Dias</th><th>Obs.</th><th></th></tr></thead><tbody>${lst.map(a=>row(a,ativo)).join('')}</tbody></table></div>`:`<p class="small muted">${vazio}</p>`;
   return `<section class="card"><div class="spread"><h2>Afastamentos</h2><div class="row">
     <select class="ctl" id="af-tipo" style="width:auto"><option value="">Todos os motivos</option>${TIPOS.map(x=>`<option ${ui.afTipo===x?'selected':''}>${x}</option>`).join('')}</select>
     <button class="btn sm pri" data-act="novoAfast">Registrar afastamento</button></div></div>
-    <p class="small muted" style="margin:6px 0 0">Durante o afastamento o militar sai da escala, mas a folga dele continua contando. No dia seguinte ao último dia fora ele se apresenta (sem serviço) e, 24 h depois, entra de serviço. Os serviços previstos para ele durante o afastamento passam automaticamente para o próximo mais folgado.</p></section>
+    <p class="small muted" style="margin:6px 0 0">Durante o afastamento o militar sai da escala, mas a folga dele continua contando. No dia da apresentação ele não é escalado; a partir do dia seguinte está pronto e entra quando for o mais folgado. Os serviços previstos para ele durante o afastamento passam automaticamente para o próximo mais folgado.</p></section>
   <section class="card"><h3>Em curso (${em.length})</h3>${tbl(em,true,'Nenhum afastamento em curso.')}</section>
   <section class="card"><h3>Programados (${fut.length})</h3>${tbl(fut,false,'Nenhum afastamento programado.')}</section>
   <section class="card"><details><summary>Encerrados (${fim.length})</summary>${tbl(fim,false,'Nenhum afastamento encerrado.')}</details></section>`;
@@ -797,7 +796,7 @@ function viewAjustes(){
     <li>Cada escala (guarda, cabo de dia e sargento de dia) é independente, com seus próprios militares e folgas. Em cada dia entram os militares com maior folga naquela cor. Empate: quem está há mais tempo sem serviço; depois a ordem da lista.</li>
     <li>Quem tirou serviço fica ${c.descanso} dia(s) sem poder ser escalado (${c.descanso*24} h). Se faltar gente, o sistema usa quem tem menos descanso e avisa.</li>
     <li>Na <b>Perm Cmdo</b> quem tira a sexta (ou a véspera do feriado) continua no sábado, domingo e feriado seguintes; por isso o sistema só escala nesse dia quem está livre o bloco inteiro, inclusive nas outras escalas.</li>
-    <li>Afastado não concorre, mas a folga dele continua contando. Terminado o afastamento, ele se apresenta no dia seguinte e entra de serviço 24 h depois da apresentação. Militar novo entra com a folga inicial informada no cadastro.</li>
+    <li>Afastado não concorre, mas a folga dele continua contando. No dia da apresentação não é escalado; a partir do dia seguinte volta a concorrer normalmente e entra quando for o mais folgado. Militar novo entra com a folga inicial informada no cadastro.</li>
     <li>Dias passados ficam gravados no histórico. Trocas feitas à mão são respeitadas, e o restante da previsão se recalcula a partir delas.</li></ol></section>`;
 }
 
@@ -855,8 +854,8 @@ function dlgAfast(id,milId){
   openDlg('af',`<h2>${a?'Editar afastamento':'Registrar afastamento'}</h2>
   <label class="f">Militar<select id="af-mil"><option value="">Escolha…</option>${ESC_ORDEM.map(e=>`<optgroup label="${ESC[e].nome}">${milsEsc(e).map(m=>`<option value="${m.id}" ${sel===m.id?'selected':''}>${esc(nome(m.id))}</option>`).join('')}</optgroup>`).join('')}</select></label>
   <div class="fgrid"><label class="f">Motivo<select id="af-t">${TIPOS.map(x=>`<option ${a?.tipo===x?'selected':''}>${x}</option>`).join('')}</select></label>
-  <label class="f">Primeiro dia fora<input type="date" id="af-i" value="${a?.inicio||today()}"></label>
-  <label class="f">Último dia fora<input type="date" id="af-f" value="${a?.fim||''}"><span class="hint">Em branco = sem data de retorno.</span></label></div>
+  <label class="f">Início do afastamento<input type="date" id="af-i" value="${a?.inicio||today()}"></label>
+  <label class="f">Data de apresentação<input type="date" id="af-f" value="${a?.fim?addDays(a.fim,1):''}"><span class="hint">Nesse dia não é escalado; no dia seguinte já pode entrar de serviço. Em branco = ainda sem data.</span></label></div>
   <label class="f">Observação<input id="af-o" value="${esc(a?.obs||'')}" placeholder="Ex.: BI nº 190, atestado de 5 dias"></label>
   ${foot(a?'<button type="button" class="btn danger" data-act="delAfast">Excluir</button>':'')}`,{id});
 }
@@ -925,7 +924,7 @@ const actions={
   async delAfast(e){if(e.dataset.ok!=='1'){e.dataset.ok='1';e.textContent='Confirmar exclusão';return}
     const id=dlgData.id;closeDlg();await mutate(()=>store.delAfast(id),'Afastamento excluído')},
   async retorno(e){const a=state.afast[e.dataset.id];const fim=addDays(today(),-1);
-    await mutate(async()=>{if(fim<a.inicio)await store.delAfast(a.id);else await store.setAfast(a.id,{...a,fim})},'Retorno registrado: volta à escala hoje')},
+    await mutate(async()=>{if(fim<a.inicio)await store.delAfast(a.id);else await store.setAfast(a.id,{...a,fim})},'Apresentação registrada: hoje não é escalado, amanhã já concorre')},
   async autoDay(){const d=dlgData.d,m=monthKey(ui.esc,d.slice(0,7));closeDlg();
     await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};delete dias[d];await store.setMonth(m,dias)},'Dia voltou ao cálculo automático')},
   async salvarCfg(){const c=cfg();const pe={...(state.config.porDiaEscala||{})};const por=1,de=parseInt($('#cf-desc').value),ini=$('#cf-ini').value;
@@ -963,8 +962,8 @@ async function submitDlg(){
         await store.setMilitar(newId('m'),{escala:ui.esc,ordem:++ord,grad,nome:nm,entrada:ent,saida:null,folgaIniP:esp?Math.floor((n-1-i)*per/n):0,folgaIniV:esp?Math.floor(((i+Math.floor(n/2))%n)*per/n):0,exemplo:false});
       }},`${linhas.length} militares importados`);
   }else if(dlgKind==='af'){
-    const mil=$('#af-mil').value,ini=$('#af-i').value,fim=$('#af-f').value||null;
-    if(!mil)return fail('Escolha o militar.');if(!ini)return fail('Informe o primeiro dia fora.');if(fim&&fim<ini)return fail('O último dia não pode ser antes do primeiro.');
+    const mil=$('#af-mil').value,ini=$('#af-i').value,apres=$('#af-f').value||null,fim=apres?addDays(apres,-1):null;  // guarda o último dia fora
+    if(!mil)return fail('Escolha o militar.');if(!ini)return fail('Informe o início do afastamento.');if(apres&&apres<=ini)return fail('A apresentação tem de ser depois do início do afastamento.');
     const id=dlgData.id||newId('a');const data={militarId:mil,tipo:$('#af-t').value,inicio:ini,fim,obs:$('#af-o').value.trim()};
     closeDlg();await mutate(()=>store.setAfast(id,data),`Afastamento registrado: ${nome(mil)}`);
   }else if(dlgKind==='day'){
