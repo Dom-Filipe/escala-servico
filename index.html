@@ -271,7 +271,7 @@ let db=null,downloads=null;
 const ESC={sgt:{nome:'Sargento de dia',curto:'Sgt de dia',def:1,grad:'3º Sgt',quem:'sargentos'},
            cabo:{nome:'Cabo de dia',curto:'Cb de dia',def:1,grad:'Cb',quem:'cabos'},
            guarda:{nome:'Guarda',curto:'Guarda',def:4,grad:'Sd',quem:'soldados'},
-           perm:{nome:'Permanência do Comando',curto:'Perm Cmdo',def:1,grad:'Sd',quem:'militares',soUteis:true}};
+           perm:{nome:'Permanência do Comando',curto:'Perm Cmdo',def:1,grad:'Sd',quem:'militares',soUteis:true,emenda:true}};
 const ESC_BASE=Object.keys(ESC);
 const ESC_ORDEM=['guarda','cabo','sgt','perm'];
 /* escalas criadas pelo sargenteante ficam em config.escalasExtra */
@@ -280,7 +280,7 @@ function rebuildEsc(){
   for(const k of Object.keys(ESC))if(!ESC_BASE.includes(k))delete ESC[k];
   ESC_ORDEM.length=0;ESC_ORDEM.push('guarda','cabo','sgt','perm');
   for(const x of (state.config.escalasExtra||[])){if(!x||!x.id||ESC_BASE.includes(x.id))continue;
-    ESC[x.id]={nome:x.nome,curto:x.curto||x.nome,def:Math.max(1,+x.P||1),grad:x.grad||'Sd',quem:x.quem||'militares',soUteis:!!x.soUteis,extra:true,inicio:x.inicio||null};ESC_ORDEM.push(x.id)}
+    ESC[x.id]={nome:x.nome,curto:x.curto||x.nome,def:Math.max(1,+x.P||1),grad:x.grad||'Sd',quem:x.quem||'militares',soUteis:!!x.soUteis,emenda:!!(x.soUteis&&x.emenda),extra:true,inicio:x.inicio||null};ESC_ORDEM.push(x.id)}
   if(typeof ui!=='undefined'&&!ESC[ui.esc])ui.esc='guarda';
 }
 const escNome=e=>(ESC[e]||{nome:e}).nome;
@@ -295,7 +295,7 @@ function porDiaDe(e,cor,c0){const c=c0||{...DEFAULT_CFG,...state.config};const p
   if(v&&typeof v==='object')v=cor?v[cor]:v.P;return Math.max(1,parseInt(v)||ESC[e].def)}
 function porDiaTxt(e){const p=porDiaDe(e,'P'),v=porDiaDe(e,'V');return p===v?`${p}/dia`:`${p} preta · ${v} verm.`}
 function cfg(e){e=e||(typeof ui!=='undefined'?ui.esc:'guarda');const c={...DEFAULT_CFG,...state.config};if(!c.inicio)c.inicio=today();
-  c.porDia=porDiaDe(e,'P',c);c.porDiaV=porDiaDe(e,'V',c);c.nDia=cor=>cor==='V'?(ESC[e].soUteis?0:c.porDiaV):c.porDia;c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
+  c.porDia=porDiaDe(e,'P',c);c.porDiaV=porDiaDe(e,'V',c);c.nDia=cor=>cor==='V'?(ESC[e].soUteis?(ESC[e].emenda?c.porDia:0):c.porDiaV):c.porDia;c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
 let stateVer=0;const mudou=()=>{stateVer++};
 const store={
   async setMilitar(id,data){mudou();if(db)await db.doc('militares/'+id).set(data);state.militares[id]={...data,id}},
@@ -334,7 +334,8 @@ function simulate(fim,opt={}){
   const ini0=ESC[E]&&ESC[E].inicio&&ESC[E].inicio>c.inicio?ESC[E].inicio:c.inicio;
   for(let d=ini0;d<=fim;d=addDays(d,1)){
     const ov=getOv(d,E),cd=corDia(d),cor=ov?.cor||cd.cor,N=c.nDia(cor);
-    if(ESC[E].soUteis&&cor==='V'){days.push({d,cor,motivo:cd.motivo,ids:[],ov:null,reduced:[],deficit:0,af:{},apr:{},obr:{},pre:null,folgaDia:true});continue}
+    const emenda=ESC[E].soUteis&&ESC[E].emenda;
+    if(ESC[E].soUteis&&cor==='V'&&!emenda){days.push({d,cor,motivo:cd.motivo,ids:[],ov:null,reduced:[],deficit:0,af:{},apr:{},obr:{},pre:null,folgaDia:true});continue}
     const ativos=mils.filter(m=>(!m.entrada||m.entrada<=d)&&(!m.saida||d<m.saida));
     for(const m of ativos)if(!st[m.id])st[m.id]={P:+m.folgaIniP||0,V:+m.folgaIniV||0,last:m.ultimoIni||null};
     const af={},apr={},obr={};const d1=addDays(d,-1),d2=addDays(d,-2);
@@ -344,26 +345,35 @@ function simulate(fim,opt={}){
       else if(l.some(x=>x.fim===d2)&&!afOn(m.id,d1))obr[m.id]=true;  // 24 h depois da apresentação: entra de serviço
     }
     const bq={};for(const m of ativos){if(af[m.id])continue;const b=bloqDe(m,d);if(b)bq[m.id]=b}
+    /* emenda: quem tira o último dia útil continua nos dias vermelhos seguintes (sexta → sábado → domingo) */
+    const bloco=[];if(emenda&&cor==='P'){for(let k=1;k<=10;k++){const dk=addDays(d,k),ok=getOv(dk,E);if((ok?.cor||corDia(dk).cor)!=='V')break;bloco.push(dk)}}
+    const cont=[];if(emenda&&cor==='V'&&!ov&&days.length){const pv=days[days.length-1];
+      for(const id of pv.ids)if(ativos.some(m=>m.id===id)&&!af[id]&&bq[id]!=='ESV')cont.push(id)}
+    const blocoBq={};for(const m of ativos)for(const dk of bloco){if(afOn(m.id,dk)||bloqDe(m,dk))blocoBq[m.id]=(blocoBq[m.id]||0)+1}
     if(opt.before===d)before={st:clone(st),af,apr,obr,bq,ativos,cor};
     
     let ids,reduced=[],deficit=0;
-    const fixAhead=new Set();for(let k=1;k<=R;k++){const o=getOv(addDays(d,k),E);if(o)(o.ids||[]).forEach(i=>fixAhead.add(i))}
+    const fixAhead=new Set();for(let k=1;k<=R+bloco.length;k++){const o=getOv(addDays(d,k),E);if(o)(o.ids||[]).forEach(i=>fixAhead.add(i))}
     const descansado=m=>{const l=st[m.id].last;return !l||diff(l,d)>R};
     let pre=null;
-    if(opt.trace){pre={};for(const m of ativos){const s=st[m.id];pre[m.id]={f:s[cor],last:s.last,af:af[m.id]||null,rest:!descansado(m),fix:fixAhead.has(m.id),apr:!!apr[m.id],obr:!!obr[m.id],bq:bq[m.id]||null}}}
+    if(opt.trace){pre={};for(const m of ativos){const s=st[m.id];pre[m.id]={f:s[emenda&&cor==='V'?'P':cor],last:s.last,af:af[m.id]||null,rest:!descansado(m),fix:fixAhead.has(m.id),apr:!!apr[m.id],obr:!!obr[m.id],bq:bq[m.id]||null,bb:!!blocoBq[m.id]}}}
     if(ov){ids=(ov.ids||[]).filter(Boolean)}
+    else if(cont.length>=N){ids=cont.slice(0,N)}
     else{
-      const disp=ativos.filter(m=>!af[m.id]&&!apr[m.id]&&!bq[m.id]&&!fixAhead.has(m.id));
+      const dispAll=ativos.filter(m=>!af[m.id]&&!apr[m.id]&&!bq[m.id]&&!fixAhead.has(m.id)&&!cont.includes(m.id)),disp=dispAll.filter(m=>!blocoBq[m.id]);
       const sc=(a,b)=>{const A=st[a.id],B=st[b.id];if(B[cor]!==A[cor])return B[cor]-A[cor];
         const la=A.last||'',lb=B.last||'';if(la!==lb)return la<lb?-1:1;return (a.ordem||0)-(b.ordem||0)};
-      const forc=disp.filter(m=>obr[m.id]).sort(sc).slice(0,N).map(m=>m.id);
+      const forc=cont.concat(disp.filter(m=>obr[m.id]).sort(sc).slice(0,N-cont.length).map(m=>m.id));
       ids=forc.concat(disp.filter(m=>descansado(m)&&!forc.includes(m.id)).sort(sc).slice(0,N-forc.length).map(m=>m.id));
-      if(ids.length<N){reduced=disp.filter(m=>!descansado(m)&&diff(st[m.id].last,d)>0).sort(sc).slice(0,N-ids.length).map(m=>m.id);ids=ids.concat(reduced)}
+      if(ids.length<N)ids=ids.concat(dispAll.filter(m=>descansado(m)&&!ids.includes(m.id)).sort((a,b)=>(blocoBq[a.id]||0)-(blocoBq[b.id]||0)||sc(a,b)).slice(0,N-ids.length).map(m=>m.id)); // ninguém livre o bloco todo: entra quem está livre hoje
+      if(ids.length<N){reduced=dispAll.filter(m=>!descansado(m)&&diff(st[m.id].last,d)>0).sort(sc).slice(0,N-ids.length).map(m=>m.id);ids=ids.concat(reduced)}
       deficit=N-ids.length;
     }
     const S=new Set(ids);
-    for(const m of ativos){const s=st[m.id];if(S.has(m.id)){s[cor]=0;s.last=d}else s[cor]++}  // folga conta inclusive afastado
-    days.push({d,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,ov,reduced,deficit,af,apr,obr,bq,pre});
+    const emd=emenda&&cor==='V';
+    for(const m of ativos){const s=st[m.id];if(S.has(m.id)){if(!emd)s[cor]=0;s.last=d}else if(!emd)s[cor]++}  // folga conta inclusive afastado; na emenda a folga fica parada
+    if(emd&&pre){const pv=days.length?days[days.length-1].ids:[];for(const id of ids)if(pre[id]&&pv.includes(id))pre[id].rest=false}  // continuação do mesmo serviço
+    days.push({d,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,ov,reduced,deficit,af,apr,obr,bq,pre,emenda:emd||undefined});
     if(opt.after===d)after=clone(st);
   }
   return{days,st,before,after};
@@ -378,8 +388,10 @@ const simCache=new Map();
 function servicosDe(e,fim){const k=`${e}|${fim}|${stateVer}`;if(simCache.has(k))return simCache.get(k);
   if(simCache.size>40)simCache.clear();const sv={};for(const x of simulate(fim,{esc:e}).days)for(const i of x.ids)(sv[i]||=new Set()).add(x.d);
   simCache.set(k,sv);return sv}
-function fixosDe(e){const sv={},pre=e==='guarda'?/^\d{4}-\d{2}$/:new RegExp('^'+e+'_\\d{4}-\\d{2}$');
-  for(const [k,v] of Object.entries(state.meses))if(pre.test(k))for(const [d,o] of Object.entries(v.dias||{}))for(const i of (o.ids||[]))(sv[i]||=new Set()).add(d);return sv}
+function fixosDe(e){const sv={},emd=ESC[e]?.soUteis&&ESC[e]?.emenda,pre=e==='guarda'?/^\d{4}-\d{2}$/:new RegExp('^'+e+'_\\d{4}-\\d{2}$');
+  for(const [k,v] of Object.entries(state.meses))if(pre.test(k))for(const [d,o] of Object.entries(v.dias||{}))for(const i of (o.ids||[])){(sv[i]||=new Set()).add(d);
+    if(emd&&(o.cor||corDia(d).cor)==='P')for(let k=1;k<=10;k++){const dk=addDays(d,k),ok=getOv(dk,e);if(ok||corDia(dk).cor!=='V')break;sv[i].add(dk)}}  // emenda: segue no fim de semana
+  return sv}
 const BQ={ESV:['ES','de serviço em outra escala no mesmo dia'],SSV:['SS','saindo de serviço em outra escala (descanso)'],PSV:['PS','de serviço em outra escala logo depois']};
 function nome(id,fb){const m=state.militares[id];return m?`${m.grad?m.grad+' ':''}${m.nome}`:(fb||'(removido)')}
 function nomeDia(day,i){return nome(day.ids[i],day.ov?.nomes?.[i])}
@@ -642,9 +654,9 @@ function quadroDados(){
       if(q.apr)prob.push(`${nome(id)} escalado no dia da apresentação`);
       if(q.bq)prob.push(`${nome(id)}: ${BQ[q.bq][1]}`)}
     for(const [id,q] of Object.entries(p))if(q.obr&&!x.ids.includes(id))prob.push(`${nome(id)} deveria entrar de serviço 24 h após a apresentação`);
-    const eleg=Object.entries(p).filter(([id,q])=>!q.af&&!q.rest&&!q.fix&&!q.apr&&!q.obr&&!q.bq);
+    const eleg=Object.entries(p).filter(([id,q])=>!q.af&&!q.rest&&!q.fix&&!q.apr&&!q.obr&&!q.bq&&!q.bb);
     const fora=eleg.filter(([id])=>!x.ids.includes(id)),dentro=x.ids.map(id=>p[id]).filter(q=>q&&!q.af&&!q.rest&&!q.obr&&!q.apr);
-    if(fora.length&&dentro.length){const maxF=Math.max(...fora.map(([,q])=>q.f)),minD=Math.min(...dentro.map(q=>q.f));
+    if(fora.length&&dentro.length&&!x.emenda){const maxF=Math.max(...fora.map(([,q])=>q.f)),minD=Math.min(...dentro.map(q=>q.f));
       if(maxF>minD){const quem=fora.filter(([,q])=>q.f>minD).map(([id,q])=>`${nome(id)} (${q.f})`);prob.push(`Fora da ordem de folga: ficou de fora ${quem.join(', ')}, mais folgado que quem entrou (${minD})`)}}
     x.prob=prob;
   }
@@ -754,7 +766,7 @@ function viewAjustes(){
   <section class="card"><div class="spread"><h2>Escalas</h2>${state.canWrite?'<button class="btn sm pri" data-act="novaEscala">Nova escala</button>':''}</div>
     <p class="small muted" style="margin:6px 0 10px">Cada escala tem seus próprios militares, folgas e histórico. As regras de descanso, afastamento e feriados valem para todas.</p>
     <div class="tbl-wrap"><table><thead><tr><th>Escala</th><th class="num">Preta</th><th class="num">Vermelha</th><th class="num">Militares</th><th></th></tr></thead><tbody>
-    ${ESC_ORDEM.map(e=>`<tr><td><b>${esc(ESC[e].nome)}</b>${ESC[e].extra?' <span class="tag">criada</span>':''}${ESC[e].soUteis?'<div class="small muted">só dias úteis</div>':''}</td><td class="num mono">${porDiaDe(e,'P')}</td><td class="num mono">${ESC[e].soUteis?'—':porDiaDe(e,'V')}</td><td class="num mono">${milsEsc(e).length}</td><td>${state.canWrite?`<button class="btn sm" data-act="editEscala" data-e="${e}">Editar</button>`:''}</td></tr>`).join('')}
+    ${ESC_ORDEM.map(e=>`<tr><td><b>${esc(ESC[e].nome)}</b>${ESC[e].extra?' <span class="tag">criada</span>':''}${ESC[e].soUteis?`<div class="small muted">${ESC[e].emenda?'quem tira o dia útil antes segue no fim de semana/feriado':'só dias úteis'}</div>`:''}</td><td class="num mono">${porDiaDe(e,'P')}</td><td class="num mono">${ESC[e].soUteis?(ESC[e].emenda?'emenda':'—'):porDiaDe(e,'V')}</td><td class="num mono">${milsEsc(e).length}</td><td>${state.canWrite?`<button class="btn sm" data-act="editEscala" data-e="${e}">Editar</button>`:''}</td></tr>`).join('')}
     </tbody></table></div></section>
   <section class="card"><h2>Feriados (escala vermelha)</h2>
     <p class="small muted" style="margin:6px 0 10px">Os feriados nacionais são calculados sozinhos, inclusive Carnaval e Corpus Christi. Desmarque os que a sua OM não considera. Acrescente os feriados municipais e estaduais abaixo.</p>
@@ -781,6 +793,7 @@ function viewAjustes(){
     <li>Sábado, domingo e feriado são <b>escala vermelha</b>; os demais dias são <b>escala preta</b>. Cada cor tem uma folga separada.</li>
     <li>Cada escala (guarda, cabo de dia e sargento de dia) é independente, com seus próprios militares e folgas. Em cada dia entram os militares com maior folga naquela cor. Empate: quem está há mais tempo sem serviço; depois a ordem da lista.</li>
     <li>Quem tirou serviço fica ${c.descanso} dia(s) sem poder ser escalado (${c.descanso*24} h). Se faltar gente, o sistema usa quem tem menos descanso e avisa.</li>
+    <li>Na <b>Perm Cmdo</b> quem tira a sexta (ou a véspera do feriado) continua no sábado, domingo e feriado seguintes; por isso o sistema só escala nesse dia quem está livre o bloco inteiro, inclusive nas outras escalas.</li>
     <li>Afastado não concorre, mas a folga dele continua contando. Terminado o afastamento, ele se apresenta no dia seguinte e entra de serviço 24 h depois da apresentação. Militar novo entra com a folga inicial informada no cadastro.</li>
     <li>Dias passados ficam gravados no histórico. Trocas feitas à mão são respeitadas, e o restante da previsão se recalcula a partir delas.</li></ol></section>`;
 }
@@ -802,7 +815,8 @@ function dlgEscala(e){
   <datalist id="grads">${GRADS.map(g=>`<option value="${g}">`).join('')}</datalist>`}
   <div class="fgrid"><label class="f">Escalados na preta<input type="number" id="es-p" min="1" max="30" value="${x?porDiaDe(e,'P'):1}"></label>
   <label class="f" id="es-v-wrap" ${x?.soUteis?'hidden':''}>Escalados na vermelha<input type="number" id="es-v" min="1" max="30" value="${x?porDiaDe(e,'V'):1}"></label></div>
-  ${base?'':`<label class="row small"><input type="checkbox" id="es-uteis" ${x?.soUteis?'checked':''}> Só dias úteis (sem sábado, domingo e feriado), como a Perm Cmdo</label>`}
+  ${base?'':`<label class="row small"><input type="checkbox" id="es-uteis" ${x?.soUteis?'checked':''}> Sem escala própria no sábado, domingo e feriado</label>
+  <label class="row small" id="es-emenda-wrap" ${x?.soUteis?'':'hidden'}><input type="checkbox" id="es-emenda" ${!x||x.emenda?'checked':''}> Quem tira sexta (ou a véspera do feriado) continua no sábado, domingo e feriado, como a Perm Cmdo</label>`}
   <p class="hint">Depois de criar, cadastre os militares em <b>Militares</b>. Se o militar já está em outra escala, escolha "Mesmo militar de" no cadastro: assim ele não é escalado aqui no dia em que entra ou sai de serviço lá.</p>
   ${foot(x&&!base?'<button type="button" class="btn danger" data-act="delEscala">Excluir escala</button>':'')}`,{e});
 }
@@ -962,7 +976,7 @@ async function submitDlg(){
     if(!base){const nomeE=$('#es-nome').value.trim();if(!nomeE)return fail('Dê um nome para a escala.');
       if(!id){const slug=nomeE.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'').slice(0,14)||'escala';
         id='x_'+slug;let k=2;while(ESC[id])id='x_'+slug.slice(0,12)+k++}
-      const reg={id,inicio:(e0&&ESC[e0]?.inicio)||today(),nome:nomeE,curto:$('#es-curto').value.trim()||nomeE,quem:$('#es-quem').value.trim()||'militares',grad:$('#es-grad').value.trim()||'Sd',soUteis:uteis,P,V};
+      const reg={id,inicio:(e0&&ESC[e0]?.inicio)||today(),nome:nomeE,curto:$('#es-curto').value.trim()||nomeE,quem:$('#es-quem').value.trim()||'militares',grad:$('#es-grad').value.trim()||'Sd',soUteis:uteis,emenda:uteis&&!!$('#es-emenda')?.checked,P,V};
       extras=extras.filter(x=>x.id!==id).concat(reg)}
     pe[id]=P===V?P:{P,V};c.porDiaEscala=pe;c.escalasExtra=extras;if(!c.inicio)c.inicio=cfg().inicio;
     closeDlg();await mutate(()=>store.setConfig(c),e0?'Escala atualizada':'Escala criada');
@@ -977,7 +991,7 @@ document.addEventListener('change',e=>{const id=e.target.id;
   else if(id==='pv-h'){ui.pvH=+e.target.value;saveUi();render()}
   else if(id==='pv-m'){ui.pvM=e.target.value;saveUi();render()}
   else if(id==='af-tipo'){ui.afTipo=e.target.value;render()}
-  else if(id==='es-uteis'){const w=$('#es-v-wrap');if(w)w.hidden=e.target.checked}
+  else if(id==='es-uteis'){const w=$('#es-v-wrap');if(w)w.hidden=e.target.checked;const w2=$('#es-emenda-wrap');if(w2)w2.hidden=!e.target.checked}
   else if(id==='pl-file'){const f=e.target.files&&e.target.files[0];if(!f)return;e.target.value='';
     (async()=>{try{toast('Lendo a planilha…');const X=await carregarXLSX();const P=lerPlanilha(X,await f.arrayBuffer());dlgPlanilha(P)}catch(err){console.error(err);toast('Não consegui ler esse arquivo. Exporte a planilha como Excel (.xlsx).')}})()}
   else if(id==='bk-file'){const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>importarBackup(String(r.result));r.readAsText(f)}});
