@@ -10,7 +10,7 @@ Sistema web para montar e conferir as escalas de serviço de 24 horas:
 - **Descanso vale entre escalas**: quem é o mesmo militar em duas escalas (campo "Mesmo militar de outra escala") não pega serviço numa escala no dia, nem dentro do descanso, de um serviço em outra. Prioridade: Sgt de dia > Cb de dia > Guarda > escalas criadas > Perm Cmdo; a de menor prioridade cede, mas respeita os dias já fixados na outra. No quadro: **ES** (de serviço em outra escala), **SS** (saindo de serviço), **PS** (serviço logo depois).
 - **Perm Cmdo emenda o fim de semana**: quem tira a sexta (ou a véspera de feriado) continua no sábado, domingo e feriados seguintes. Só é escalado nesse dia quem está livre no bloco inteiro, inclusive nas outras escalas; se ninguém estiver, o app escolhe quem tem menos choques e avisa na conferência. Escalas criadas podem usar a mesma regra.
 - **Afastamentos** (saúde, férias, dispensa, missão, curso etc.): o militar sai da escala e a folga **continua contando**.
-  No dia seguinte ao fim do afastamento ele se **apresenta** e, 24 h depois, **entra de serviço**.
+  No afastamento informa-se o **início** e a **data de apresentação**. No dia da apresentação ele não é escalado; a partir do dia seguinte volta a concorrer pela folga e entra quando for o mais folgado.
 - Feriados nacionais calculados automaticamente (inclui Carnaval, Sexta-feira Santa e Corpus Christi) e feriados locais cadastráveis.
 - Dias passados ficam gravados no histórico; trocas manuais são respeitadas e o restante se recalcula.
 
