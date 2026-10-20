@@ -1,7 +1,7 @@
 // Service worker: guarda as páginas para abrir rápido e funcionar sem internet.
 // Rede primeiro (sempre a versão nova quando online); sem rede, usa a cópia guardada.
 // Os dados do Appwrite nunca são guardados aqui.
-const CACHE = 'escala-v3';
+const CACHE = 'escala-v4';
 const ARQUIVOS = ['./', './index.html', './previsao.html', './config.js', './dados-planilha.js',
   './manifest.json', './manifest-previsao.json', './icons/app-192.png', './icons/prev-192.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARQUIVOS)).then(() => self.skipWaiting())); });

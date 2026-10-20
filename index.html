@@ -366,7 +366,9 @@ function simulate(fim,opt={}){
       const forc=cont.concat(disp.filter(m=>obr[m.id]).sort(sc).slice(0,N-cont.length).map(m=>m.id));
       ids=forc.concat(disp.filter(m=>descansado(m)&&!forc.includes(m.id)).sort(sc).slice(0,N-forc.length).map(m=>m.id));
       if(ids.length<N)ids=ids.concat(dispAll.filter(m=>descansado(m)&&!ids.includes(m.id)).sort((a,b)=>(blocoBq[a.id]||0)-(blocoBq[b.id]||0)||sc(a,b)).slice(0,N-ids.length).map(m=>m.id)); // ninguém livre o bloco todo: entra quem está livre hoje
-      if(ids.length<N){reduced=dispAll.filter(m=>!descansado(m)&&diff(st[m.id].last,d)>0).sort(sc).slice(0,N-ids.length).map(m=>m.id);ids=ids.concat(reduced)}
+      if(ids.length<N){reduced=dispAll.filter(m=>!descansado(m)&&diff(st[m.id].last,d)>0).sort((a,b)=>diff(st[b.id].last,d)-diff(st[a.id].last,d)||sc(a,b)).slice(0,N-ids.length).map(m=>m.id);ids=ids.concat(reduced)}
+      // último recurso: quem está no descanso de outra escala (nunca quem está de serviço nela no mesmo dia)
+      if(ids.length<N){const r2=ativos.filter(m=>!af[m.id]&&!apr[m.id]&&(bq[m.id]==='SSV'||bq[m.id]==='PSV')&&!fixAhead.has(m.id)&&!ids.includes(m.id)&&(!st[m.id].last||diff(st[m.id].last,d)>0)).sort((a,b)=>(descansado(b)?1:0)-(descansado(a)?1:0)||(st[b.id].last?diff(st[b.id].last,d):999)-(st[a.id].last?diff(st[a.id].last,d):999)||sc(a,b)).slice(0,N-ids.length).map(m=>m.id);reduced=reduced.concat(r2);ids=ids.concat(r2)}
       deficit=N-ids.length;
     }
     const S=new Set(ids);
