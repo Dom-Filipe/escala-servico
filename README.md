@@ -7,6 +7,7 @@ Sistema web para montar e conferir as escalas de serviço de 24 horas:
 - **Escala preta** (segunda a sexta) e **escala vermelha** (sábado, domingo e feriados), cada uma com folga própria.
 - Em cada dia entra o militar **mais folgado** na cor do dia. Desempate: há mais tempo sem serviço, depois a ordem da lista.
 - **Descanso mínimo de 48 h** após o serviço (quem tira sexta não pega sábado nem domingo).
+- **Descanso vale entre escalas**: quem é o mesmo militar em duas escalas (campo "Mesmo militar de outra escala") não pega serviço numa escala no dia, nem dentro do descanso, de um serviço em outra. Prioridade: Sgt de dia > Cb de dia > Guarda > escalas criadas > Perm Cmdo; a de menor prioridade cede, mas respeita os dias já fixados na outra. No quadro: **ES** (de serviço em outra escala), **SS** (saindo de serviço), **PS** (serviço logo depois).
 - **Afastamentos** (saúde, férias, dispensa, missão, curso etc.): o militar sai da escala e a folga **continua contando**.
   No dia seguinte ao fim do afastamento ele se **apresenta** e, 24 h depois, **entra de serviço**.
 - Feriados nacionais calculados automaticamente (inclui Carnaval, Sexta-feira Santa e Corpus Christi) e feriados locais cadastráveis.

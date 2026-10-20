@@ -276,6 +276,7 @@ const ESC_BASE=Object.keys(ESC);
 const ESC_ORDEM=['guarda','cabo','sgt','perm'];
 /* escalas criadas pelo sargenteante ficam em config.escalasExtra */
 function rebuildEsc(){
+  if(typeof stateVer!=='undefined')stateVer++;
   for(const k of Object.keys(ESC))if(!ESC_BASE.includes(k))delete ESC[k];
   ESC_ORDEM.length=0;ESC_ORDEM.push('guarda','cabo','sgt','perm');
   for(const x of (state.config.escalasExtra||[])){if(!x||!x.id||ESC_BASE.includes(x.id))continue;
@@ -295,14 +296,15 @@ function porDiaDe(e,cor,c0){const c=c0||{...DEFAULT_CFG,...state.config};const p
 function porDiaTxt(e){const p=porDiaDe(e,'P'),v=porDiaDe(e,'V');return p===v?`${p}/dia`:`${p} preta · ${v} verm.`}
 function cfg(e){e=e||(typeof ui!=='undefined'?ui.esc:'guarda');const c={...DEFAULT_CFG,...state.config};if(!c.inicio)c.inicio=today();
   c.porDia=porDiaDe(e,'P',c);c.porDiaV=porDiaDe(e,'V',c);c.nDia=cor=>cor==='V'?(ESC[e].soUteis?0:c.porDiaV):c.porDia;c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
+let stateVer=0;const mudou=()=>{stateVer++};
 const store={
-  async setMilitar(id,data){if(db)await db.doc('militares/'+id).set(data);state.militares[id]={...data,id}},
-  async delMilitar(id){if(db)await db.doc('militares/'+id).delete();delete state.militares[id]},
-  async setAfast(id,data){if(db)await db.doc('afastamentos/'+id).set(data);state.afast[id]={...data,id}},
-  async delAfast(id){if(db)await db.doc('afastamentos/'+id).delete();delete state.afast[id]},
-  async setConfig(data){if(db)await db.doc('config/geral').set(data);state.config={...data};rebuildEsc()},
-  async setMonth(m,dias){if(db)await db.doc('meses/'+m).set({dias});state.meses[m]={dias}},
-  async setPlan(e,data){if(db)await db.doc('planilha/'+e).set(data);state.plan[e]=data},
+  async setMilitar(id,data){mudou();if(db)await db.doc('militares/'+id).set(data);state.militares[id]={...data,id}},
+  async delMilitar(id){mudou();if(db)await db.doc('militares/'+id).delete();delete state.militares[id]},
+  async setAfast(id,data){mudou();if(db)await db.doc('afastamentos/'+id).set(data);state.afast[id]={...data,id}},
+  async delAfast(id){mudou();if(db)await db.doc('afastamentos/'+id).delete();delete state.afast[id]},
+  async setConfig(data){mudou();if(db)await db.doc('config/geral').set(data);state.config={...data};rebuildEsc()},
+  async setMonth(m,dias){mudou();if(db)await db.doc('meses/'+m).set({dias});state.meses[m]={dias}},
+  async setPlan(e,data){mudou();if(db)await db.doc('planilha/'+e).set(data);state.plan[e]=data},
 };
 const getOv=(d,e)=>state.meses[monthKey(e||ui.esc,d.slice(0,7))]?.dias?.[d]||null;
 
@@ -320,11 +322,15 @@ function simulate(fim,opt={}){
   const ai=afastIndex();
   const afOn=(id,d)=>(ai[id]||[]).find(a=>a.inicio<=d&&(!a.fim||d<=a.fim));
   const st={},days=[];let before=null,after=null;
-  /* Perm Cmdo: o mesmo militar não pode estar entrando (ESV) nem saindo (SSV) de serviço em outra escala */
-  const outros={};
-  if(mils.some(m=>m.ref)){const refEsc={};for(const m of mils)if(m.ref&&state.militares[m.ref])refEsc[escOf(state.militares[m.ref])]=1;
-    for(const e2 of Object.keys(refEsc))if(e2!==E)for(const x of simulate(addDays(fim,1),{esc:e2}).days)for(const i of x.ids)(outros[i]||=new Set()).add(x.d)}
-  const bloqDe=(m,d)=>{if(!m.ref||!outros[m.ref])return null;if(outros[m.ref].has(d))return 'ESV';if(outros[m.ref].has(addDays(d,-1)))return 'SSV';return null};
+  /* Mesmo militar em mais de uma escala: o descanso vale entre todas.
+     As escalas têm prioridade (sgt, cabo, guarda, criadas, perm); a de menor prioridade desvia de quem está
+     de serviço na outra no mesmo dia (ESV), nos dias de descanso depois (SSV) ou antes (PSV) desse serviço. */
+  const vinc=gruposVinc(),pr=prioridade(),meuP=pr.indexOf(E),outros={};
+  for(const m of mils)for(const o of (vinc[m.id]||[])){const e2=escOf(state.militares[o]);if(e2===E||pr.indexOf(e2)<0)continue;
+    // escala de prioridade maior: tudo o que ela prevê; de prioridade menor: só os dias já fixados nela (planilha ou troca manual)
+    const sv=pr.indexOf(e2)<meuP?servicosDe(e2,addDays(fim,R+1)):fixosDe(e2);if(sv[o])(outros[m.id]||=[]).push(sv[o])}
+  const bloqDe=(m,d)=>{const L=outros[m.id];if(!L)return null;for(const S of L){if(S.has(d))return 'ESV';
+      for(let k=1;k<=Math.max(1,R);k++){if(S.has(addDays(d,-k)))return 'SSV';if(S.has(addDays(d,k)))return 'PSV'}}return null};
   const ini0=ESC[E]&&ESC[E].inicio&&ESC[E].inicio>c.inicio?ESC[E].inicio:c.inicio;
   for(let d=ini0;d<=fim;d=addDays(d,1)){
     const ov=getOv(d,E),cd=corDia(d),cor=ov?.cor||cd.cor,N=c.nDia(cor);
@@ -362,6 +368,19 @@ function simulate(fim,opt={}){
   }
   return{days,st,before,after};
 }
+/* pessoas vinculadas entre escalas (campo "Mesmo militar de outra escala"), em grupos */
+function gruposVinc(){const par={};const f=x=>{while(par[x]!==undefined&&par[x]!==x)x=par[x];return x};
+  for(const m of Object.values(state.militares))if(m.ref&&state.militares[m.ref]){const a=f(m.id),b=f(m.ref);if(a!==b)par[a]=b}
+  const g={};for(const m of Object.values(state.militares)){const r=f(m.id);(g[r]||=[]).push(m.id)}
+  const out={};for(const ids of Object.values(g))if(ids.length>1)for(const i of ids)out[i]=ids.filter(x=>x!==i);return out}
+const prioridade=()=>['sgt','cabo','guarda',...ESC_ORDEM.filter(e=>!ESC_BASE.includes(e)),'perm'].filter(e=>ESC[e]);
+const simCache=new Map();
+function servicosDe(e,fim){const k=`${e}|${fim}|${stateVer}`;if(simCache.has(k))return simCache.get(k);
+  if(simCache.size>40)simCache.clear();const sv={};for(const x of simulate(fim,{esc:e}).days)for(const i of x.ids)(sv[i]||=new Set()).add(x.d);
+  simCache.set(k,sv);return sv}
+function fixosDe(e){const sv={},pre=e==='guarda'?/^\d{4}-\d{2}$/:new RegExp('^'+e+'_\\d{4}-\\d{2}$');
+  for(const [k,v] of Object.entries(state.meses))if(pre.test(k))for(const [d,o] of Object.entries(v.dias||{}))for(const i of (o.ids||[]))(sv[i]||=new Set()).add(d);return sv}
+const BQ={ESV:['ES','de serviço em outra escala no mesmo dia'],SSV:['SS','saindo de serviço em outra escala (descanso)'],PSV:['PS','de serviço em outra escala logo depois']};
 function nome(id,fb){const m=state.militares[id];return m?`${m.grad?m.grad+' ':''}${m.nome}`:(fb||'(removido)')}
 function nomeDia(day,i){return nome(day.ids[i],day.ov?.nomes?.[i])}
 
@@ -415,7 +434,7 @@ try{const s=JSON.parse(localStorage.getItem('escala-ui')||'{}');ui.pvH=s.pvH||60
 function saveUi(){try{localStorage.setItem('escala-ui',JSON.stringify({pvH:ui.pvH,pvM:ui.pvM,esc:ui.esc}))}catch(e){}}
 const $=s=>document.querySelector(s);
 let toastT;function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,3800)}
-let rq=false;function render(){if(rq)return;rq=true;requestAnimationFrame(()=>{rq=false;draw()})}
+let rq=false;function render(){stateVer++;if(rq)return;rq=true;requestAnimationFrame(()=>{rq=false;draw()})}
 
 function draw(){
   const t=today(),d=parse(t);
@@ -621,7 +640,7 @@ function quadroDados(){
       if(q.af)prob.push(`${nome(id)} escalado durante ${q.af.tipo.toLowerCase()}`);
       if(q.rest)prob.push(`${nome(id)} com menos de ${c.descanso*24} h de descanso (serviço em ${br(q.last)})`);
       if(q.apr)prob.push(`${nome(id)} escalado no dia da apresentação`);
-      if(q.bq)prob.push(`${nome(id)} está ${q.bq==='ESV'?'entrando':'saindo'} de serviço em outra escala`)}
+      if(q.bq)prob.push(`${nome(id)}: ${BQ[q.bq][1]}`)}
     for(const [id,q] of Object.entries(p))if(q.obr&&!x.ids.includes(id))prob.push(`${nome(id)} deveria entrar de serviço 24 h após a apresentação`);
     const eleg=Object.entries(p).filter(([id,q])=>!q.af&&!q.rest&&!q.fix&&!q.apr&&!q.obr&&!q.bq);
     const fora=eleg.filter(([id])=>!x.ids.includes(id)),dentro=x.ids.map(id=>p[id]).filter(q=>q&&!q.af&&!q.rest&&!q.obr&&!q.apr);
@@ -645,7 +664,7 @@ function viewQuadro(){
       if(inS){const v=q.af||q.rest||q.apr||q.bq;return `<td class="s ${x.cor} ${v?'viol':''}" title="${esc(`Serviço ${x.cor==='P'?'preto':'vermelho'} · folga ${q.f}${q.obr?' · retorno de afastamento':''}${q.rest?' · descanso insuficiente':''}${q.af?' · afastado':''}${q.apr?' · dia da apresentação':''}`)}">S</td>`}
       if(q.af)return `<td class="af" title="${esc(q.af.tipo+' · folga '+q.f)}">${AFCOD[q.af.tipo]||'AF'}</td>`;
       if(q.apr)return `<td class="apr" title="${esc('Apresentação · folga '+q.f)}">AP</td>`;
-      if(q.bq)return `<td class="apr" title="${esc((q.bq==='ESV'?'Entrando de serviço':'Saindo de serviço')+' em outra escala · folga '+q.f)}">${q.bq==='ESV'?'ES':'SS'}</td>`;
+      if(q.bq)return `<td class="apr" title="${esc(BQ[q.bq][1]+' · folga '+q.f)}">${BQ[q.bq][0]}</td>`;
       if(q.obr)return `<td class="af viol" title="Deveria estar de serviço">${q.f}</td>`;
       return `<td class="${q.rest?'rest':''}" title="${esc(`Folga ${x.cor==='P'?'preta':'vermelha'}: ${q.f}${q.rest?' · em descanso':''}`)}">${q.f}</td>`}).join('');
     const k=tot[m.id]||{P:0,V:0};
@@ -661,7 +680,7 @@ function viewQuadro(){
     <p class="small muted" style="margin:6px 0 0">Cada linha é um militar e cada coluna é um dia. O número é a folga na cor daquele dia (preta ou vermelha), antes da escala do dia. Em cada coluna, os marcados com <b>S</b> (${c.porDia===c.porDiaV?c.porDia:c.porDia+' na preta e '+c.porDiaV+' na vermelha'}) precisam ter as maiores folgas entre os disponíveis. A linha <b>Conferência</b> refaz essa verificação dia a dia.</p>
     <div class="banner" style="margin-top:12px;background:${probs.length?'var(--verm-soft)':'var(--accent-soft)'}"><span>${probs.length?`<b>${probs.length} dia(s) com problema neste mês.</b> Passe o mouse ou toque no <b>!</b> da linha Conferência para ver o motivo, ou clique no dia para corrigir.`:`<b>Mês conferido:</b> ${days.length} dias, todos com o efetivo completo, descanso de ${c.descanso*24} h respeitado e escala na ordem de folga.`}</span></div>
     ${probs.length?`<ul class="plain small" style="margin-top:8px">${probs.map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.prob.map(esc).join('<br>')}</span></li>`).join('')}</ul>`:''}
-    <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> apresentação (serviço no dia seguinte)</span><span><span class="qk apr">ES</span>/<span class="qk apr">SS</span> entrando/saindo de serviço em outra escala</span><span><span class="qk viol s P">S</span> erro</span></div>
+    <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> apresentação (serviço no dia seguinte)</span><span><span class="qk apr">ES</span>/<span class="qk apr">SS</span>/<span class="qk apr">PS</span> de serviço em outra escala no dia, logo antes ou logo depois</span><span><span class="qk viol s P">S</span> erro</span></div>
     <div class="q-wrap"><table class="q">
       <thead><tr><th class="nm corner" rowspan="2">Militar</th>${head1}<th class="sum" rowspan="2" title="Serviços pretos">P</th><th class="sum" rowspan="2" title="Serviços vermelhos">V</th><th class="sum" rowspan="2">Tot</th></tr><tr>${head2}</tr></thead>
       <tbody>${rows}</tbody>
@@ -833,7 +852,7 @@ function dlgDay(d){
     return{m,f:s[day.cor],a,rest,fut,l,apr:b.apr[m.id],obr:b.obr[m.id],bq:b.bq[m.id]}};
   const cands=b.ativos.map(info).sort((x,y)=>(!!y.obr-!!x.obr)||(!!x.a-!!y.a)||(!!x.apr-!!y.apr)||(!!x.rest-!!y.rest)||(y.f-x.f));
   const N=Math.max(c.nDia(day.cor),day.ids.length);
-  const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.bq?(k.bq==='ESV'?' · entrando de serviço em outra escala':' · saindo de serviço em outra escala'):''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
+  const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.bq?' · '+BQ[k.bq][1]:''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
     return `<option value="${k.m.id}" ${cur===k.m.id?'selected':''} ${k.a&&cur!==k.m.id?'disabled':''}>${esc(lab)}</option>`}).join('');
   const slots=Array.from({length:N},(_,i)=>`<div class="slot"><span class="n">${i+1}</span><select class="ctl" id="dd-s${i}">${opt(day.ids[i]||'')}</select></div>`).join('');
   const dd=parse(d);
@@ -1167,7 +1186,7 @@ async function importarBackup(txt){
 function loadDemo(){const ex=exemplo(['guarda','cabo','sgt']);state.militares=ex.mil;state.afast=ex.af;state.config=ex.config;rebuildEsc();state.mode='demo';state.loaded=true;render()}
 function subscribe(){
   let pend=5;const first={};
-  const wrap=(k,f)=>snap=>{f(snap);if(!first[k]){first[k]=1;if(--pend===0){state.loaded=true;agendarPublicacao()}}render()};
+  const wrap=(k,f)=>snap=>{f(snap);mudou();if(!first[k]){first[k]=1;if(--pend===0){state.loaded=true;agendarPublicacao()}}render()};
   const onErr=e=>{console.error(e);if(e?.code==='revoked'){toast('O acesso a esta escala foi alterado.')}};
   const toMap=s=>{const o={};s.docs.forEach(d=>o[d.id]={...d.data(),id:d.id});return o};
   db.collection('militares').onSnapshot(wrap('m',s=>{state.militares=toMap(s)}),onErr);
