@@ -640,8 +640,8 @@ function csvTexto(sep){
 /* ---------- Quadro (planilha de conferência) ---------- */
 const AFCOD={'Saúde':'SA','Férias':'FÉ','Dispensa':'DP','Missão':'MI','Curso':'CU','Instalação':'IN','Núpcias':'NU','Luto':'LU','Outro':'OU'};
 function quadroDados(){
-  const c=cfg(),mes=ui.qMes||today().slice(0,7);
-  const first=mes+'-01',lastD=addDays(addDays(first,32).slice(0,7)+'-01',-1);
+  const c=cfg(),t0=today(),rol=!ui.qMes,mes=ui.qMes||t0.slice(0,7);   // sem mês escolhido: próximos 30 dias a partir de hoje
+  const first=rol?t0:mes+'-01',lastD=rol?addDays(t0,29):addDays(addDays(first,32).slice(0,7)+'-01',-1);
   const sim=simulate(lastD,{trace:true});
   const days=sim.days.filter(x=>x.d>=first);
   const mils=milsEsc()
@@ -662,14 +662,14 @@ function quadroDados(){
       if(maxF>minD){const quem=fora.filter(([,q])=>q.f>minD).map(([id,q])=>`${nome(id)} (${q.f})`);prob.push(`Fora da ordem de folga: ficou de fora ${quem.join(', ')}, mais folgado que quem entrou (${minD})`)}}
     x.prob=prob;
   }
-  return{mes,first,lastD,days,mils};
+  return{mes,rol,first,lastD,days,mils};
 }
 function viewQuadro(){
   if(!milsEsc().length)return emptyState();
-  const c=cfg(),t=today(),{mes,days,mils}=quadroDados();
-  const [yy,mm]=mes.split('-').map(Number);
+  const c=cfg(),t=today(),{mes,rol,first,lastD,days,mils}=quadroDados();
+  const [yy,mm]=mes.split('-').map(Number);const per=rol?'neste período':'neste mês';
   const tot={};for(const x of days)for(const id of x.ids)(tot[id]||={P:0,V:0})[x.cor]++;
-  const head1=days.map(x=>`<th class="d ${x.cor} ${x.d===t?'hoje':''}" data-act="editDay" data-d="${x.d}" title="${esc(DOWL[dow(x.d)]+(x.motivo?' · '+x.motivo:''))}">${+x.d.slice(8)}</th>`).join('');
+  const head1=days.map(x=>`<th class="d ${x.cor} ${x.d===t?'hoje':''}" data-act="editDay" data-d="${x.d}" title="${esc(DOWL[dow(x.d)]+(x.motivo?' · '+x.motivo:''))}">${+x.d.slice(8)}${rol&&(x.d.slice(8)==='01'||x===days[0])?`<small>/${+x.d.slice(5,7)}</small>`:''}</th>`).join('');
   const head2=days.map(x=>`<th class="w ${x.cor} ${x.d===t?'hoje':''}">${DOW[dow(x.d)].charAt(0)}</th>`).join('');
   const rows=mils.map(m=>{
     const cells=days.map(x=>{const q=x.pre?.[m.id];
@@ -687,12 +687,13 @@ function viewQuadro(){
   const confere=days.map(x=>`<td class="${x.prob.length?'bad':'ok'}" title="${esc(x.prob.join(' | ')||'Dia conferido')}" data-act="editDay" data-d="${x.d}">${x.prob.length?'!':'✓'}</td>`).join('');
   const totP=days.filter(x=>x.cor==='P').length,totV=days.length-totP;
   const probs=days.filter(x=>x.prob.length);
-  const prevM=`${mm===1?yy-1:yy}-${pad(mm===1?12:mm-1)}`,nextM=`${mm===12?yy+1:yy}-${pad(mm===12?1:mm+1)}`;
+  const prevM=rol?mes:`${mm===1?yy-1:yy}-${pad(mm===1?12:mm-1)}`,nextM=`${mm===12?yy+1:yy}-${pad(mm===12?1:mm+1)}`;
+  const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   return `<section class="card">
-    <div class="spread"><h2>Quadro de folgas · ${ESC[ui.esc].nome} · ${['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mm-1]} ${yy}</h2>
-    <div class="row"><button class="btn sm" data-act="qMes" data-m="${prevM}">◂ Mês anterior</button>${mes!==t.slice(0,7)?'<button class="btn sm" data-act="qMes" data-m="">Mês atual</button>':''}<button class="btn sm" data-act="qMes" data-m="${nextM}">Próximo mês ▸</button><button class="btn sm" data-act="qCopiar">Copiar para o Excel</button></div></div>
+    <div class="spread"><h2>Quadro de folgas · ${ESC[ui.esc].nome} · ${rol?`próximos 30 dias (${br(first)} a ${br(lastD)})`:`${MESES[mm-1]} ${yy}`}</h2>
+    <div class="row"><button class="btn sm" data-act="qMes" data-m="${prevM}">◂ ${rol?MESES[mm-1]:'Mês anterior'}</button>${rol?'':'<button class="btn sm" data-act="qMes" data-m="">Próximos 30 dias</button>'}<button class="btn sm" data-act="qMes" data-m="${nextM}">${rol?MESES[+nextM.slice(5)-1]:'Próximo mês'} ▸</button><button class="btn sm" data-act="qCopiar">Copiar para o Excel</button></div></div>
     <p class="small muted" style="margin:6px 0 0">Cada linha é um militar e cada coluna é um dia. O número é a folga na cor daquele dia (preta ou vermelha), antes da escala do dia. Em cada coluna, os marcados com <b>S</b> (${c.porDia===c.porDiaV?c.porDia:c.porDia+' na preta e '+c.porDiaV+' na vermelha'}) precisam ter as maiores folgas entre os disponíveis. A linha <b>Conferência</b> refaz essa verificação dia a dia.</p>
-    <div class="banner" style="margin-top:12px;background:${probs.length?'var(--verm-soft)':'var(--accent-soft)'}"><span>${probs.length?`<b>${probs.length} dia(s) com problema neste mês.</b> Passe o mouse ou toque no <b>!</b> da linha Conferência para ver o motivo, ou clique no dia para corrigir.`:`<b>Mês conferido:</b> ${days.length} dias, todos com o efetivo completo, descanso de ${c.descanso*24} h respeitado e escala na ordem de folga.`}</span></div>
+    <div class="banner" style="margin-top:12px;background:${probs.length?'var(--verm-soft)':'var(--accent-soft)'}"><span>${probs.length?`<b>${probs.length} dia(s) com problema ${per}.</b> Passe o mouse ou toque no <b>!</b> da linha Conferência para ver o motivo, ou clique no dia para corrigir.`:`<b>${rol?"Período conferido":"Mês conferido"}:</b> ${days.length} dias, todos com o efetivo completo, descanso de ${c.descanso*24} h respeitado e escala na ordem de folga.`}</span></div>
     ${probs.length?`<ul class="plain small" style="margin-top:8px">${probs.map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.prob.map(esc).join('<br>')}</span></li>`).join('')}</ul>`:''}
     <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> apresentação (serviço no dia seguinte)</span><span><span class="qk apr">ES</span>/<span class="qk apr">SS</span>/<span class="qk apr">PS</span> de serviço em outra escala no dia, logo antes ou logo depois</span><span><span class="qk viol s P">S</span> erro</span></div>
     <div class="q-wrap"><table class="q">
