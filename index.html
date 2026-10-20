@@ -264,7 +264,9 @@ function corDia(d){const f=feriado(d),w=dow(d);if(f)return{cor:'V',motivo:'Feria
 const COR={P:'Escala preta',V:'Escala vermelha'};
 
 /* ===================== estado e armazenamento ===================== */
-const DEFAULT_CFG={porDia:4,descanso:2,inicio:null,feriadosNacionais:true,feriadosIgnorados:[],feriadosExtra:[]};
+const DEFAULT_CFG={porDia:4,descanso:2,inicio:null,feriadosNacionais:true,feriadosIgnorados:[],feriadosExtra:[],descansoEntre:{'guarda>perm':1,'perm>guarda':1}};
+/* descanso (em dias de 24 h) de quem sai de serviço na escala A e vai para a escala B; sem regra = descanso geral */
+function descEntre(a,b){const c={...DEFAULT_CFG,...state.config},m={...DEFAULT_CFG.descansoEntre,...(c.descansoEntre||{})},v=m[a+'>'+b];const R=parseInt(c.descanso);return v!=null&&!isNaN(+v)?Math.max(0,+v):(isNaN(R)?2:R)}
 const state={militares:{},afast:{},meses:{},plan:{},config:{},loaded:false,mode:'loading',canWrite:true,busy:false};
 let db=null,downloads=null;
 /* Escalas: cada uma tem seus próprios militares, escalados por dia e histórico; regras e feriados são comuns. */
@@ -328,9 +330,10 @@ function simulate(fim,opt={}){
   const vinc=gruposVinc(),pr=prioridade(),meuP=pr.indexOf(E),outros={};
   for(const m of mils)for(const o of (vinc[m.id]||[])){const e2=escOf(state.militares[o]);if(e2===E||pr.indexOf(e2)<0)continue;
     // escala de prioridade maior: tudo o que ela prevê; de prioridade menor: só os dias já fixados nela (planilha ou troca manual)
-    const sv=pr.indexOf(e2)<meuP?servicosDe(e2,addDays(fim,R+1)):fixosDe(e2);if(sv[o])(outros[m.id]||=[]).push(sv[o])}
-  const bloqDe=(m,d)=>{const L=outros[m.id];if(!L)return null;for(const S of L){if(S.has(d))return 'ESV';
-      for(let k=1;k<=Math.max(1,R);k++){if(S.has(addDays(d,-k)))return 'SSV';if(S.has(addDays(d,k)))return 'PSV'}}return null};
+    const sv=pr.indexOf(e2)<meuP?servicosDe(e2,addDays(fim,R+4)):fixosDe(e2);if(sv[o])(outros[m.id]||=[]).push({S:sv[o],ant:descEntre(e2,E),dep:descEntre(E,e2)})}
+  const bloqDe=(m,d)=>{const L=outros[m.id];if(!L)return null;for(const {S,ant,dep} of L){if(S.has(d))return 'ESV';
+      for(let k=1;k<=Math.max(1,ant);k++)if(S.has(addDays(d,-k)))return 'SSV';   // saiu de serviço lá há pouco
+      for(let k=1;k<=Math.max(1,dep);k++)if(S.has(addDays(d,k)))return 'PSV'}return null};  // entra de serviço lá logo depois
   const ini0=ESC[E]&&ESC[E].inicio&&ESC[E].inicio>c.inicio?ESC[E].inicio:c.inicio;
   for(let d=ini0;d<=fim;d=addDays(d,1)){
     const ov=getOv(d,E),cd=corDia(d),cor=ov?.cor||cd.cor,N=c.nDia(cor);
@@ -819,6 +822,7 @@ function dlgEscala(e){
   <label class="f" id="es-v-wrap" ${x?.soUteis?'hidden':''}>Escalados na vermelha<input type="number" id="es-v" min="1" max="30" value="${x?porDiaDe(e,'V'):1}"></label></div>
   ${base?'':`<label class="row small"><input type="checkbox" id="es-uteis" ${x?.soUteis?'checked':''}> Sem escala própria no sábado, domingo e feriado</label>
   <label class="row small" id="es-emenda-wrap" ${x?.soUteis?'':'hidden'}><input type="checkbox" id="es-emenda" ${!x||x.emenda?'checked':''}> Quem tira sexta (ou a véspera do feriado) continua no sábado, domingo e feriado, como a Perm Cmdo</label>`}
+  ${e?`<h3 style="margin-top:6px">Descanso para quem também está em outra escala</h3><div class="fgrid">${ESC_ORDEM.filter(o=>o!==e).map(o=>{const v=descEntre(e,o);return `<label class="f">${esc(ESC[o].nome)}<select id="es-de-${o}">${[1,2,3].map(k=>`<option value="${k}" ${v===k?'selected':''}>${k*24} h</option>`).join('')}</select></label>`}).join('')}</div><p class="hint">Tempo mínimo entre sair de serviço numa escala e entrar na outra, nos dois sentidos. O padrão é o descanso geral (${cfg().descanso*24} h).</p>`:''}
   <p class="hint">Depois de criar, cadastre os militares em <b>Militares</b>. Se o militar já está em outra escala, escolha "Mesmo militar de" no cadastro: assim ele não é escalado aqui no dia em que entra ou sai de serviço lá.</p>
   ${foot(x&&!base?'<button type="button" class="btn danger" data-act="delEscala">Excluir escala</button>':'')}`,{e});
 }
@@ -980,7 +984,8 @@ async function submitDlg(){
         id='x_'+slug;let k=2;while(ESC[id])id='x_'+slug.slice(0,12)+k++}
       const reg={id,inicio:(e0&&ESC[e0]?.inicio)||today(),nome:nomeE,curto:$('#es-curto').value.trim()||nomeE,quem:$('#es-quem').value.trim()||'militares',grad:$('#es-grad').value.trim()||'Sd',soUteis:uteis,emenda:uteis&&!!$('#es-emenda')?.checked,P,V};
       extras=extras.filter(x=>x.id!==id).concat(reg)}
-    pe[id]=P===V?P:{P,V};c.porDiaEscala=pe;c.escalasExtra=extras;if(!c.inicio)c.inicio=cfg().inicio;
+    pe[id]=P===V?P:{P,V};c.porDiaEscala=pe;
+    if(e0){const de={...DEFAULT_CFG.descansoEntre,...(c.descansoEntre||{})};for(const o of ESC_ORDEM){const el=$('#es-de-'+o);if(!el)continue;const v=+el.value,R0=cfg().descanso;for(const k of [e0+'>'+o,o+'>'+e0]){if(v===R0&&DEFAULT_CFG.descansoEntre[k]==null)delete de[k];else de[k]=v}}c.descansoEntre=de}c.escalasExtra=extras;if(!c.inicio)c.inicio=cfg().inicio;
     closeDlg();await mutate(()=>store.setConfig(c),e0?'Escala atualizada':'Escala criada');
     if(!e0){ui.esc=id;saveUi();location.hash='#militares';render()}
   }else closeDlg();
