@@ -330,8 +330,9 @@ function simulate(fim,opt={}){
   const vinc=gruposVinc(),pr=prioridade(),meuP=pr.indexOf(E),outros={};
   for(const m of mils)for(const o of (vinc[m.id]||[])){const e2=escOf(state.militares[o]);if(e2===E||pr.indexOf(e2)<0)continue;
     // escala de prioridade maior: tudo o que ela prevê; de prioridade menor: só os dias já fixados nela (planilha ou troca manual)
-    const sv=pr.indexOf(e2)<meuP?servicosDe(e2,addDays(fim,R+4)):fixosDe(e2);if(sv[o])(outros[m.id]||=[]).push({S:sv[o],ant:descEntre(e2,E),dep:descEntre(E,e2)})}
-  const bloqDe=(m,d)=>{const L=outros[m.id];if(!L)return null;for(const {S,ant,dep} of L){if(S.has(d))return 'ESV';
+    const sv=pr.indexOf(e2)<meuP?servicosDe(e2,addDays(fim,R+4)):fixosDe(e2);if(sv[o])(outros[m.id]||=[]).push({S:sv[o],e2,ant:descEntre(e2,E),dep:descEntre(E,e2)})}
+  let bqEsc=null;  // escala que causou o último bloqueio
+  const bloqDe=(m,d)=>{const L=outros[m.id];if(!L)return null;for(const {S,e2,ant,dep} of L){bqEsc=e2;if(S.has(d))return 'ESV';
       for(let k=1;k<=Math.max(1,ant);k++)if(S.has(addDays(d,-k)))return 'SSV';   // saiu de serviço lá há pouco
       for(let k=1;k<=Math.max(1,dep);k++)if(S.has(addDays(d,k)))return 'PSV'}return null};  // entra de serviço lá logo depois
   const ini0=ESC[E]&&ESC[E].inicio&&ESC[E].inicio>c.inicio?ESC[E].inicio:c.inicio;
@@ -346,19 +347,19 @@ function simulate(fim,opt={}){
       const l=ai[m.id]||[];
       if(l.some(x=>x.fim===d1))apr[m.id]=true;   // dia da apresentação: não concorre; no dia seguinte volta a concorrer pela folga
     }
-    const bq={};for(const m of ativos){if(af[m.id])continue;const b=bloqDe(m,d);if(b)bq[m.id]=b}
+    const bq={},bqE={};for(const m of ativos){if(af[m.id])continue;const b=bloqDe(m,d);if(b){bq[m.id]=b;bqE[m.id]=bqEsc}}
     /* emenda: quem tira o último dia útil continua nos dias vermelhos seguintes (sexta → sábado → domingo) */
     const bloco=[];if(emenda&&cor==='P'){for(let k=1;k<=10;k++){const dk=addDays(d,k),ok=getOv(dk,E);if((ok?.cor||corDia(dk).cor)!=='V')break;bloco.push(dk)}}
     const cont=[];if(emenda&&cor==='V'&&!ov&&days.length){const pv=days[days.length-1];
       for(const id of pv.ids)if(ativos.some(m=>m.id===id)&&!af[id]&&bq[id]!=='ESV')cont.push(id)}
     const blocoBq={};for(const m of ativos)for(const dk of bloco){if(afOn(m.id,dk)||bloqDe(m,dk))blocoBq[m.id]=(blocoBq[m.id]||0)+1}
-    if(opt.before===d)before={st:clone(st),af,apr,obr,bq,ativos,cor};
+    if(opt.before===d)before={st:clone(st),af,apr,obr,bq,bqE,ativos,cor};
     
     let ids,reduced=[],deficit=0;
     const fixAhead=new Set();for(let k=1;k<=R+bloco.length;k++){const o=getOv(addDays(d,k),E);if(o)(o.ids||[]).forEach(i=>fixAhead.add(i))}
     const descansado=m=>{const l=st[m.id].last;return !l||diff(l,d)>R};
     let pre=null;
-    if(opt.trace){pre={};for(const m of ativos){const s=st[m.id];pre[m.id]={f:s[emenda&&cor==='V'?'P':cor],last:s.last,af:af[m.id]||null,rest:!descansado(m),fix:fixAhead.has(m.id),apr:!!apr[m.id],obr:!!obr[m.id],bq:bq[m.id]||null,bb:!!blocoBq[m.id]}}}
+    if(opt.trace){pre={};for(const m of ativos){const s=st[m.id];pre[m.id]={f:s[emenda&&cor==='V'?'P':cor],last:s.last,af:af[m.id]||null,rest:!descansado(m),fix:fixAhead.has(m.id),apr:!!apr[m.id],obr:!!obr[m.id],bq:bq[m.id]||null,bqe:bqE[m.id]||null,bb:!!blocoBq[m.id]}}}
     if(ov){ids=(ov.ids||[]).filter(Boolean)}
     else if(cont.length>=N){ids=cont.slice(0,N)}
     else{
@@ -377,7 +378,7 @@ function simulate(fim,opt={}){
     const emd=emenda&&cor==='V';
     for(const m of ativos){const s=st[m.id];if(S.has(m.id)){if(!emd)s[cor]=0;s.last=d}else if(!emd)s[cor]++}  // folga conta inclusive afastado; na emenda a folga fica parada
     if(emd&&pre){const pv=days.length?days[days.length-1].ids:[];for(const id of ids)if(pre[id]&&pv.includes(id))pre[id].rest=false}  // continuação do mesmo serviço
-    days.push({d,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,ov,reduced,deficit,af,apr,obr,bq,pre,emenda:emd||undefined});
+    days.push({d,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,ov,reduced,deficit,af,apr,obr,bq,bqE,pre,emenda:emd||undefined});
     if(opt.after===d)after=clone(st);
   }
   return{days,st,before,after};
@@ -396,6 +397,8 @@ function fixosDe(e){const sv={},emd=ESC[e]?.soUteis&&ESC[e]?.emenda,pre=e==='gua
   for(const [k,v] of Object.entries(state.meses))if(pre.test(k))for(const [d,o] of Object.entries(v.dias||{}))for(const i of (o.ids||[])){(sv[i]||=new Set()).add(d);
     if(emd&&(o.cor||corDia(d).cor)==='P')for(let k=1;k<=10;k++){const dk=addDays(d,k),ok=getOv(dk,e);if(ok||corDia(dk).cor!=='V')break;sv[i].add(dk)}}  // emenda: segue no fim de semana
   return sv}
+function bqTxt(c,e){const n=e&&ESC[e]?ESC[e].curto:null;if(!n)return BQ[c][1];
+  return c==='ESV'?`de serviço de ${n} no mesmo dia`:c==='SSV'?`saindo de serviço de ${n} (descanso)`:`entra de serviço de ${n} logo depois`}
 const BQ={ESV:['ES','de serviço em outra escala no mesmo dia'],SSV:['SS','saindo de serviço em outra escala (descanso)'],PSV:['PS','de serviço em outra escala logo depois']};
 function nome(id,fb){const m=state.militares[id];return m?`${m.grad?m.grad+' ':''}${m.nome}`:(fb||'(removido)')}
 function nomeDia(day,i){return nome(day.ids[i],day.ov?.nomes?.[i])}
@@ -656,7 +659,7 @@ function quadroDados(){
       if(q.af)prob.push(`${nome(id)} escalado durante ${q.af.tipo.toLowerCase()}`);
       if(q.rest)prob.push(`${nome(id)} com menos de ${c.descanso*24} h de descanso (serviço em ${br(q.last)})`);
       if(q.apr)prob.push(`${nome(id)} escalado no dia da apresentação`);
-      if(q.bq)prob.push(`${nome(id)}: ${BQ[q.bq][1]}`)}
+      if(q.bq)prob.push(`${nome(id)}: ${bqTxt(q.bq,q.bqe)}`)}
     for(const [id,q] of Object.entries(p))if(q.obr&&!x.ids.includes(id))prob.push(`${nome(id)} deveria entrar de serviço 24 h após a apresentação`);
     const eleg=Object.entries(p).filter(([id,q])=>!q.af&&!q.rest&&!q.fix&&!q.apr&&!q.obr&&!q.bq&&!q.bb);
     const fora=eleg.filter(([id])=>!x.ids.includes(id)),dentro=x.ids.map(id=>p[id]).filter(q=>q&&!q.af&&!q.rest&&!q.obr&&!q.apr);
@@ -680,7 +683,7 @@ function viewQuadro(){
       if(inS){const v=q.af||q.rest||q.apr||q.bq;return `<td class="s ${x.cor} ${v?'viol':''}" title="${esc(`Serviço ${x.cor==='P'?'preto':'vermelho'} · folga ${q.f}${q.obr?' · retorno de afastamento':''}${q.rest?' · descanso insuficiente':''}${q.af?' · afastado':''}${q.apr?' · dia da apresentação':''}`)}">S</td>`}
       if(q.af)return `<td class="af" title="${esc(q.af.tipo+' · folga '+q.f)}">${AFCOD[q.af.tipo]||'AF'}</td>`;
       if(q.apr)return `<td class="apr" title="${esc('Apresentação · folga '+q.f)}">AP</td>`;
-      if(q.bq)return `<td class="apr" title="${esc(BQ[q.bq][1]+' · folga '+q.f)}">${BQ[q.bq][0]}</td>`;
+      if(q.bq)return `<td class="apr" title="${esc(bqTxt(q.bq,q.bqe)+' · folga '+q.f)}">${BQ[q.bq][0]}</td>`;
       if(q.obr)return `<td class="af viol" title="Deveria estar de serviço">${q.f}</td>`;
       return `<td class="${q.rest?'rest':''}" title="${esc(`Folga ${x.cor==='P'?'preta':'vermelha'}: ${q.f}${q.rest?' · em descanso':''}`)}">${q.f}</td>`}).join('');
     const k=tot[m.id]||{P:0,V:0};
@@ -869,10 +872,10 @@ function dlgDay(d){
   const R=c.descanso;
   const info=m=>{const s=b.st[m.id],a=b.af[m.id];const l=s.last;const rest=l&&diff(l,d)<=R;
     const fut=sim.days.find(x=>x.d>d&&x.d<=addDays(d,R)&&x.ids.includes(m.id));
-    return{m,f:s[day.cor],a,rest,fut,l,apr:b.apr[m.id],obr:b.obr[m.id],bq:b.bq[m.id]}};
+    return{m,f:s[day.cor],a,rest,fut,l,apr:b.apr[m.id],obr:b.obr[m.id],bq:b.bq[m.id],bqe:b.bqE?.[m.id]}};
   const cands=b.ativos.map(info).sort((x,y)=>(!!y.obr-!!x.obr)||(!!x.a-!!y.a)||(!!x.apr-!!y.apr)||(!!x.rest-!!y.rest)||(y.f-x.f));
   const N=Math.max(c.nDia(day.cor),day.ids.length);
-  const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.bq?' · '+BQ[k.bq][1]:''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
+  const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.bq?' · '+bqTxt(k.bq,k.bqe):''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
     return `<option value="${k.m.id}" ${cur===k.m.id?'selected':''} ${k.a&&cur!==k.m.id?'disabled':''}>${esc(lab)}</option>`}).join('');
   const slots=Array.from({length:N},(_,i)=>`<div class="slot"><span class="n">${i+1}</span><select class="ctl" id="dd-s${i}">${opt(day.ids[i]||'')}</select></div>`).join('');
   const dd=parse(d);
