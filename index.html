@@ -196,6 +196,8 @@ table.q{border-collapse:separate;border-spacing:0;width:auto;font-family:var(--f
 .q td.rest,.qk.rest{background:repeating-linear-gradient(135deg,var(--surface-2) 0 3px,var(--surface) 3px 7px);color:var(--muted)}
 .q td.fora{background:var(--surface-2)}
 .q td.apr,.qk.apr{background:var(--accent-soft);color:var(--accent);font-size:.66rem;font-weight:700}
+.q td.tr,.qk.tr{background:var(--surface);color:var(--ink);font-weight:700;box-shadow:inset 0 0 0 2px var(--preta-fg)}
+.q td.s.tit,.qk.s.tit{background-image:repeating-linear-gradient(135deg,transparent 0 4px,rgba(127,127,127,.35) 4px 6px)}
 .q td.viol,.qk.viol{box-shadow:inset 0 0 0 3px var(--warn)}
 .q .sum{background:var(--surface-2);color:var(--ink);min-width:36px;font-weight:600}
 .q tfoot th,.q tfoot td{border-top:2px solid var(--line)}
@@ -369,11 +371,12 @@ function simulate(fim,opt={}){
     if(opt.before===d)before={st:clone(st),af,apr,obr,bq,bqE,ativos,cor};
     
     let ids,reduced=[],deficit=0;
-    const fixAhead=new Set();for(let k=1;k<=R+bloco.length;k++){const o=getOv(addDays(d,k),E);if(o)(o.ids||[]).forEach(i=>fixAhead.add(i))}
+    const fixAhead=new Set();for(let k=1;k<=R+bloco.length;k++){const o=getOv(addDays(d,k),E);if(o)fisicos(o).forEach(i=>fixAhead.add(i))}
     const descansado=m=>{const l=st[m.id].last;return !l||diff(l,d)>R};
     let pre=null;
     if(opt.trace){pre={};for(const m of ativos){const s=st[m.id];pre[m.id]={f:s[emenda&&cor==='V'?'P':cor],last:s.last,af:af[m.id]||null,rest:!descansado(m),fix:fixAhead.has(m.id),apr:!!apr[m.id],obr:!!obr[m.id],bq:bq[m.id]||null,bqe:bqE[m.id]||null,bb:!!blocoBq[m.id]}}}
-    if(ov){ids=(ov.ids||[]).filter(Boolean)}
+    let tit=null;
+    if(ov){ids=(ov.ids||[]).filter(Boolean);if(ov.trocas&&Object.keys(ov.trocas).length){tit={};ids=ids.map(i=>{const f=ov.trocas[i];if(f&&f!==i){tit[f]=i;return f}return i})}}
     else if(cont.length>=N){ids=cont.slice(0,N)}
     else{
       const dispAll=ativos.filter(m=>!af[m.id]&&!apr[m.id]&&!bq[m.id]&&!fixAhead.has(m.id)&&!cont.includes(m.id)),disp=dispAll.filter(m=>!blocoBq[m.id]);
@@ -387,11 +390,11 @@ function simulate(fim,opt={}){
       if(ids.length<N){const r2=ativos.filter(m=>!af[m.id]&&!apr[m.id]&&(bq[m.id]==='SSV'||bq[m.id]==='PSV')&&!fixAhead.has(m.id)&&!ids.includes(m.id)&&(!st[m.id].last||diff(st[m.id].last,d)>0)).sort((a,b)=>(descansado(b)?1:0)-(descansado(a)?1:0)||(st[b.id].last?diff(st[b.id].last,d):999)-(st[a.id].last?diff(st[a.id].last,d):999)||sc(a,b)).slice(0,N-ids.length).map(m=>m.id);reduced=reduced.concat(r2);ids=ids.concat(r2)}
       deficit=N-ids.length;
     }
-    const S=new Set(ids);
+    const S=new Set(ids.map(i=>tit?.[i]||i)),F=new Set(ids);   // S: a quem o serviço conta (folga zera); F: quem tira de fato (descanso)
     const emd=emenda&&cor==='V';
-    for(const m of ativos){const s=st[m.id];if(S.has(m.id)){if(!emd)s[cor]=0;s.last=d}else if(!emd)s[cor]++}  // folga conta inclusive afastado; na emenda a folga fica parada
+    for(const m of ativos){const s=st[m.id];if(S.has(m.id)){if(!emd)s[cor]=0}else if(!emd)s[cor]++;if(F.has(m.id))s.last=d}  // folga conta inclusive afastado; na emenda a folga fica parada
     if(emd&&pre){const pv=days.length?days[days.length-1].ids:[];for(const id of ids)if(pre[id]&&pv.includes(id))pre[id].rest=false}  // continuação do mesmo serviço
-    days.push({d,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,ov,reduced,deficit,af,apr,obr,bq,bqE,pre,emenda:emd||undefined});
+    days.push({d,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,tit,ov,reduced,deficit,af,apr,obr,bq,bqE,pre,emenda:emd||undefined});
     if(opt.after===d)after=clone(st);
   }
   return{days,st,before,after};
@@ -407,14 +410,16 @@ function servicosDe(e,fim){const k=`${e}|${fim}|${stateVer}`;if(simCache.has(k))
   if(simCache.size>40)simCache.clear();const sv={};for(const x of simulate(fim,{esc:e}).days)for(const i of x.ids)(sv[i]||=new Set()).add(x.d);
   simCache.set(k,sv);return sv}
 function fixosDe(e){const sv={},emd=ESC[e]?.soUteis&&ESC[e]?.emenda,pre=e==='guarda'?/^\d{4}-\d{2}$/:new RegExp('^'+e+'_\\d{4}-\\d{2}$');
-  for(const [k,v] of Object.entries(state.meses))if(pre.test(k))for(const [d,o] of Object.entries(v.dias||{}))for(const i of (o.ids||[])){(sv[i]||=new Set()).add(d);
+  for(const [k,v] of Object.entries(state.meses))if(pre.test(k))for(const [d,o] of Object.entries(v.dias||{}))for(const i of fisicos(o)){(sv[i]||=new Set()).add(d);
     if(emd&&(o.cor||corDia(d).cor)==='P')for(let k=1;k<=10;k++){const dk=addDays(d,k),ok=getOv(dk,e);if(ok||corDia(dk).cor!=='V')break;sv[i].add(dk)}}  // emenda: segue no fim de semana
   return sv}
 function bqTxt(c,e){const n=e&&(ESC[e]||EXT[e])?(ESC[e]||EXT[e]).curto:null;if(!n)return BQ[c][1];
   return c==='ESV'?`de serviço de ${n} no mesmo dia`:c==='SSV'?`saindo de serviço de ${n} (descanso)`:`entra de serviço de ${n} logo depois`}
 const BQ={ESV:['ES','de serviço em outra escala no mesmo dia'],SSV:['SS','saindo de serviço em outra escala (descanso)'],PSV:['PS','de serviço em outra escala logo depois']};
 function nome(id,fb){const m=state.militares[id];return m?`${m.grad?m.grad+' ':''}${m.nome}`:(fb||'(removido)')}
-function nomeDia(day,i){return nome(day.ids[i],day.ov?.nomes?.[i])}
+/* troca de serviço: ov.ids = titulares (o serviço conta para eles); ov.trocas[titular] = quem tira de fato */
+const fisicos=o=>(o?.ids||[]).filter(Boolean).map(i=>o.trocas?.[i]||i);
+function nomeDia(day,i){const id=day.ids[i],t=day.tit?.[id];return nome(id,t?null:day.ov?.nomes?.[i])+(t?` (troca c/ ${nome(t)})`:'')}
 
 /* Fixa no histórico todos os dias passados ainda calculados, para que mudanças futuras não reescrevam o passado. */
 async function freezePast(){
@@ -515,7 +520,7 @@ function cartoesDias(ini,n){
     const cor=any.cor,dd=parse(d);const xd=extDia(d)||{};
     let blocos=es.map(e=>{const x=maps[e][d];if(!x||x.folgaDia)return '';const pd=difPlan(e,x);
       const warn=x.deficit||x.reduced.length||x.ov?.manual;
-      return `<div class="sd-col ${ui.esc===e?'on':''}" data-act="editDayEsc" data-e="${e}" data-d="${d}"><span class="eyebrow">${ESC[e].nome}${x.ov?.obs==='Planilha da Cia'?' · planilha':x.ov?.manual?' · ajustado':''}</span><div class="sd-nms">${x.ids.length?x.ids.map((id,i)=>`<span class="${x.reduced.includes(id)?'reduz':''}">${id===ui.pvM?`<span class="hl">${esc(nomeDia(x,i))}</span>`:esc(nomeDia(x,i))}</span>`).join(''):''}${x.deficit?`<span class="err">faltam ${x.deficit}</span>`:''}</div>${pd?`<div class="small" style="margin-top:4px;color:var(--warn)">Planilha: ${esc(nomesPlan(pd))}</div>`:''}</div>`}).join('');
+      return `<div class="sd-col ${ui.esc===e?'on':''}" data-act="editDayEsc" data-e="${e}" data-d="${d}"><span class="eyebrow">${ESC[e].nome}${x.tit?' · troca':x.ov?.obs==='Planilha da Cia'?' · planilha':x.ov?.manual?' · ajustado':''}</span><div class="sd-nms">${x.ids.length?x.ids.map((id,i)=>`<span class="${x.reduced.includes(id)?'reduz':''}">${id===ui.pvM?`<span class="hl">${esc(nomeDia(x,i))}</span>`:esc(nomeDia(x,i))}</span>`).join(''):''}${x.deficit?`<span class="err">faltam ${x.deficit}</span>`:''}</div>${pd?`<div class="small" style="margin-top:4px;color:var(--warn)">Planilha: ${esc(nomesPlan(pd))}</div>`:''}</div>`}).join('');
     const ext=EXT_ORDEM.filter(e=>xd[e]?.n).map(e=>`<div class="sd-col" data-act="editExt" data-d="${d}"><span class="eyebrow">${EXT[e].nome}</span><div class="sd-nms"><span>${xd[e].id===ui.pvM&&ui.pvM?`<span class="hl">${esc(xd[e].n)}</span>`:esc(xd[e].n)}</span></div></div>`).join('');
     const addExt=state.canWrite&&!EXT_ORDEM.every(e=>xd[e]?.n)?`<button class="btn sm" style="justify-self:start" data-act="editExt" data-d="${d}">+ Of Dia / Adjunto</button>`:'';
     blocos=ext+blocos+addExt;
@@ -628,7 +633,7 @@ function viewPrevisao(){
     rows+=`<tr class="click ${x.cor==='V'?'fds':''}" data-act="editDay" data-d="${x.d}"><td class="mono" style="white-space:nowrap">${DOW[dow(x.d)]} ${br(x.d)}</td><td>${chip(x.cor).replace('Escala ','')}${x.motivo&&x.motivo.startsWith('Feriado')?`<div class="small muted">${esc(x.motivo.replace('Feriado · ',''))}</div>`:''}</td><td class="nmlist" style="min-width:16rem">${nms}</td><td>${flags}</td></tr>`;
   }
   // distribuição
-  const cont={};for(const x of days)for(const id of x.ids){(cont[id]||={P:0,V:0})[x.cor]++}
+  const cont={};for(const x of days)for(const id0 of x.ids){const id=x.tit?.[id0]||id0;(cont[id]||={P:0,V:0})[x.cor]++}
   const dist=mils.filter(m=>(!m.saida||m.saida>ini)&&(!m.entrada||m.entrada<=fim)).map(m=>{const k=cont[m.id]||{P:0,V:0};
     return `<tr><td class="num mono">${m.ordem}</td><td>${m.id===hl?`<span class="hl">${esc(nome(m.id))}</span>`:esc(nome(m.id))}</td><td class="num mono">${k.P}</td><td class="num mono">${k.V}</td><td class="num mono"><b>${k.P+k.V}</b></td></tr>`}).join('');
   const P=state.plan[ui.esc];const difs=P?days.filter(x=>x.d>=t&&difPlan(ui.esc,x)):[];
@@ -679,7 +684,8 @@ function quadroDados(){
       if(q.bq)prob.push(`${nome(id)}: ${bqTxt(q.bq,q.bqe)}`)}
     for(const [id,q] of Object.entries(p))if(q.obr&&!x.ids.includes(id))prob.push(`${nome(id)} deveria entrar de serviço 24 h após a apresentação`);
     const eleg=Object.entries(p).filter(([id,q])=>!q.af&&!q.rest&&!q.fix&&!q.apr&&!q.obr&&!q.bq&&!q.bb);
-    const fora=eleg.filter(([id])=>!x.ids.includes(id)),dentro=x.ids.map(id=>p[id]).filter(q=>q&&!q.af&&!q.rest&&!q.obr&&!q.apr);
+    const acc=x.ids.map(i=>x.tit?.[i]||i);   // troca: a ordem de folga se confere pelo titular
+    const fora=eleg.filter(([id])=>!acc.includes(id)&&!x.ids.includes(id)),dentro=acc.map(id=>p[id]).filter(q=>q&&!q.af&&!q.rest&&!q.obr&&!q.apr);
     if(fora.length&&dentro.length&&!x.emenda){const maxF=Math.max(...fora.map(([,q])=>q.f)),minD=Math.min(...dentro.map(q=>q.f));
       if(maxF>minD){const quem=fora.filter(([,q])=>q.f>minD).map(([id,q])=>`${nome(id)} (${q.f})`);prob.push(`Fora da ordem de folga: ficou de fora ${quem.join(', ')}, mais folgado que quem entrou (${minD})`)}}
     x.prob=prob;
@@ -690,13 +696,15 @@ function viewQuadro(){
   if(!milsEsc().length)return emptyState();
   const c=cfg(),t=today(),{mes,rol,first,lastD,days,mils}=quadroDados();
   const [yy,mm]=mes.split('-').map(Number);const per=rol?'neste período':'neste mês';
-  const tot={};for(const x of days)for(const id of x.ids)(tot[id]||={P:0,V:0})[x.cor]++;
+  const tot={};for(const x of days)for(const id0 of x.ids){const id=x.tit?.[id0]||id0;(tot[id]||={P:0,V:0})[x.cor]++};
   const head1=days.map(x=>`<th class="d ${x.cor} ${x.d===t?'hoje':''}" data-act="editDay" data-d="${x.d}" title="${esc(DOWL[dow(x.d)]+(x.motivo?' · '+x.motivo:''))}">${+x.d.slice(8)}${rol&&(x.d.slice(8)==='01'||x===days[0])?`<small>/${+x.d.slice(5,7)}</small>`:''}</th>`).join('');
   const head2=days.map(x=>`<th class="w ${x.cor} ${x.d===t?'hoje':''}">${DOW[dow(x.d)].charAt(0)}</th>`).join('');
   const rows=mils.map(m=>{
     const cells=days.map(x=>{const q=x.pre?.[m.id];
       if(!q)return '<td class="fora"></td>';
-      const inS=x.ids.includes(m.id);
+      const inS=x.ids.includes(m.id),tPor=x.tit&&Object.entries(x.tit).find(([f,t])=>t===m.id)?.[0];
+      if(tPor)return `<td class="s ${x.cor} tit" title="${esc(`Serviço contado para ele (folga zera) · tirado por ${nome(tPor)} (troca)`)}">S</td>`;
+      if(inS&&x.tit?.[m.id]){const v=q.af||q.rest||q.apr||q.bq;return `<td class="tr ${v?'viol':''}" title="${esc(`Tirou o serviço de ${nome(x.tit[m.id])} (troca) · não conta para ele, folga segue ${q.f}${q.rest?' · descanso insuficiente':''}`)}">TR</td>`}
       if(inS){const v=q.af||q.rest||q.apr||q.bq;return `<td class="s ${x.cor} ${v?'viol':''}" title="${esc(`Serviço ${x.cor==='P'?'preto':'vermelho'} · folga ${q.f}${q.obr?' · retorno de afastamento':''}${q.rest?' · descanso insuficiente':''}${q.af?' · afastado':''}${q.apr?' · dia da apresentação':''}`)}">S</td>`}
       if(q.af)return `<td class="af" title="${esc(q.af.tipo+' · folga '+q.f)}">${AFCOD[q.af.tipo]||'AF'}</td>`;
       if(q.apr)return `<td class="apr" title="${esc('Apresentação · folga '+q.f)}">AP</td>`;
@@ -717,7 +725,7 @@ function viewQuadro(){
     <p class="small muted" style="margin:6px 0 0">Cada linha é um militar e cada coluna é um dia. O número é a folga na cor daquele dia (preta ou vermelha), antes da escala do dia. Em cada coluna, os marcados com <b>S</b> (${c.porDia===c.porDiaV?c.porDia:c.porDia+' na preta e '+c.porDiaV+' na vermelha'}) precisam ter as maiores folgas entre os disponíveis. A linha <b>Conferência</b> refaz essa verificação dia a dia.</p>
     <div class="banner" style="margin-top:12px;background:${probs.length?'var(--verm-soft)':'var(--accent-soft)'}"><span>${probs.length?`<b>${probs.length} dia(s) com problema ${per}.</b> Passe o mouse ou toque no <b>!</b> da linha Conferência para ver o motivo, ou clique no dia para corrigir.`:`<b>${rol?"Período conferido":"Mês conferido"}:</b> ${days.length} dias, todos com o efetivo completo, descanso de ${c.descanso*24} h respeitado e escala na ordem de folga.`}</span></div>
     ${probs.length?`<ul class="plain small" style="margin-top:8px">${probs.map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.prob.map(esc).join('<br>')}</span></li>`).join('')}</ul>`:''}
-    <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> dia da apresentação (pronto no dia seguinte)</span><span><span class="qk apr">ES</span>/<span class="qk apr">SS</span>/<span class="qk apr">PS</span> de serviço em outra escala no dia, logo antes ou logo depois</span><span><span class="qk viol s P">S</span> erro</span></div>
+    <div class="legend"><span><span class="qk s P">S</span> serviço preto</span><span><span class="qk s V">S</span> serviço vermelho</span><span><span class="qk">5</span> folga</span><span><span class="qk rest">3</span> em descanso (48 h)</span><span><span class="qk af">FÉ</span> afastado, folga continua contando (FÉ férias, SA saúde, DP dispensa, MI missão, CU curso)</span><span><span class="qk apr">AP</span> dia da apresentação (pronto no dia seguinte)</span><span><span class="qk apr">ES</span>/<span class="qk apr">SS</span>/<span class="qk apr">PS</span> de serviço em outra escala no dia, logo antes ou logo depois</span><span><span class="qk s P tit">S</span>/<span class="qk tr">TR</span> troca: conta para quem estava escalado (S); quem tirou no lugar (TR) mantém a folga</span><span><span class="qk viol s P">S</span> erro</span></div>
     <div class="q-wrap"><table class="q">
       <thead><tr><th class="nm corner" rowspan="2">Militar</th>${head1}<th class="sum" rowspan="2" title="Serviços pretos">P</th><th class="sum" rowspan="2" title="Serviços vermelhos">V</th><th class="sum" rowspan="2">Tot</th></tr><tr>${head2}</tr></thead>
       <tbody>${rows}</tbody>
@@ -908,9 +916,11 @@ function dlgDay(d){
   const N=Math.max(c.nDia(day.cor),day.ids.length);
   const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.bq?' · '+bqTxt(k.bq,k.bqe):''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
     return `<option value="${k.m.id}" ${cur===k.m.id?'selected':''} ${k.a&&cur!==k.m.id?'disabled':''}>${esc(lab)}</option>`}).join('');
-  const slots=Array.from({length:N},(_,i)=>`<div class="slot"><span class="n">${i+1}</span><select class="ctl" id="dd-s${i}">${opt(day.ids[i]||'')}</select></div>`).join('');
+  const optT=(cur)=>`<option value="">Sem troca</option>`+cands.map(k=>`<option value="${k.m.id}" ${cur===k.m.id?'selected':''}>${esc(`Troca: tirado por ${nome(k.m.id)}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.bq?' · '+bqTxt(k.bq,k.bqe):''}`)}</option>`).join('');
+  const slots=Array.from({length:N},(_,i)=>{const f=day.ids[i]||'',t=day.tit?.[f];return `<div class="slot" style="flex-wrap:wrap"><span class="n">${i+1}</span><select class="ctl" id="dd-s${i}" style="flex:1 1 220px">${opt(t||f)}</select><select class="ctl" id="dd-t${i}" style="flex:1 1 220px">${optT(t?f:'')}</select></div>`}).join('');
   const dd=parse(d);
   openDlg('day',`<div class="spread"><h2>${DOWL[dow(d)]}, ${pad(dd.getUTCDate())} ${MES[dd.getUTCMonth()]}</h2>${chip(day.cor)}</div>
+  <p class="hint"><b>Troca de serviço:</b> deixe na primeira lista quem estava escalado e escolha na segunda quem vai tirar no lugar. O serviço conta para quem estava escalado (a folga dele zera); a folga de quem tira no lugar continua contando, mas ele cumpre o descanso.</p>
   <p class="hint">${day.motivo?esc(day.motivo)+' · ':''}Lista em ordem de folga na ${day.cor==='P'?'preta':'vermelha'}. Afastados ficam bloqueados; quem está em descanso aparece marcado.</p>
   <div style="display:grid;gap:8px">${slots}</div>
   <label class="f">Observação<input id="dd-o" value="${esc(day.ov?.obs||'')}" placeholder="Ex.: troca a pedido, Sd X por Sd Y"></label>
@@ -1007,9 +1017,12 @@ async function submitDlg(){
     const id=dlgData.id||newId('a');const data={militarId:mil,tipo:$('#af-t').value,inicio:ini,fim,obs:$('#af-o').value.trim()};
     closeDlg();await mutate(()=>store.setAfast(id,data),`Afastamento registrado: ${nome(mil)}`);
   }else if(dlgKind==='day'){
-    const ids=[];for(let i=0;i<dlgData.N;i++){const v=$('#dd-s'+i).value;if(v){if(ids.includes(v))return fail(nome(v)+' aparece duas vezes.');ids.push(v)}}
-    const {d,cor}=dlgData,m=monthKey(ui.esc,d.slice(0,7)),obs=$('#dd-o').value.trim();closeDlg();
-    await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};dias[d]={ids,nomes:ids.map(i=>nome(i)),cor,manual:true,obs};await store.setMonth(m,dias)},`Escala de ${br(d)} ajustada`);
+    const ids=[],trocas={},fis=[];for(let i=0;i<dlgData.N;i++){const v=$('#dd-s'+i).value,t=$('#dd-t'+i)?.value||'';if(!v){if(t)return fail('Na linha '+(i+1)+', escolha primeiro quem estava escalado.');continue}
+      if(ids.includes(v))return fail(nome(v)+' aparece duas vezes.');ids.push(v);const f=t&&t!==v?t:v;if(f!==v)trocas[v]=f;if(fis.includes(f))return fail(nome(f)+' aparece duas vezes no dia.');fis.push(f)}
+    if(ids.some(i=>fis.includes(i)&&trocas[i]==null&&Object.values(trocas).includes(i)))return fail('A mesma pessoa não pode estar escalada e tirar no lugar de outro no mesmo dia.');
+    const {d,cor}=dlgData,m=monthKey(ui.esc,d.slice(0,7));let obs=$('#dd-o').value.trim();
+    const tx=Object.entries(trocas).map(([t,f])=>`${nome(f)} no lugar de ${nome(t)}`).join('; ');if(tx&&(!obs||obs==='Planilha da Cia'||obs.startsWith('Troca: ')))obs='Troca: '+tx;closeDlg();
+    await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};dias[d]={ids,nomes:ids.map(i=>nome(i)),cor,manual:true,obs,...(tx?{trocas}:{})};await store.setMonth(m,dias)},tx?`Troca registrada: ${tx}`:`Escala de ${br(d)} ajustada`);
   }else if(dlgKind==='escext'){
     const e=dlgData.e,c={...state.config},nm={...(c.nomesEscala||{})},n=$('#ee-nome').value.trim(),cu=$('#ee-curto').value.trim();
     if((!n||n===NOME_PADRAO[e].nome)&&(!cu||cu===NOME_PADRAO[e].curto))delete nm[e];else nm[e]={nome:n||NOME_PADRAO[e].nome,curto:cu||n||NOME_PADRAO[e].curto};c.nomesEscala=nm;
