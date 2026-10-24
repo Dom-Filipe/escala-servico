@@ -314,7 +314,10 @@ function porDiaDe(e,cor,c0){const c=c0||{...DEFAULT_CFG,...state.config};const p
   if(v&&typeof v==='object')v=cor?v[cor]:v.P;return Math.max(1,parseInt(v)||ESC[e].def)}
 function porDiaTxt(e){const p=porDiaDe(e,'P'),v=porDiaDe(e,'V');return p===v?`${p}/dia`:`${p} preta · ${v} verm.`}
 function cfg(e){e=e||(typeof ui!=='undefined'?ui.esc:'guarda');const c={...DEFAULT_CFG,...state.config};if(!c.inicio)c.inicio=today();
-  c.porDia=porDiaDe(e,'P',c);c.porDiaV=porDiaDe(e,'V',c);c.nDia=cor=>cor==='V'?(ESC[e].soUteis?(ESC[e].emenda?c.porDia:0):c.porDiaV):c.porDia;c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
+  c.porDia=porDiaDe(e,'P',c);c.porDiaV=porDiaDe(e,'V',c);c.nDia=cor=>cor==='V'?(ESC[e].soUteis?(ESC[e].emenda?c.porDia:0):c.porDiaV):c.porDia;
+  // efetivo programado por período (Ajustes → Efetivo por período): vale do dia "de" ao dia "até"; fora disso, o padrão
+  c.nDiaD=(d,cor)=>{const p=periodoDe(e,d,c);if(!p)return c.nDia(cor);if(cor==='V'&&ESC[e].soUteis&&!ESC[e].emenda)return 0;return Math.max(0,+(cor==='V'?(p.V??p.P):p.P)||0)};c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
+function periodoDe(e,d,c){const L=(c||state.config).periodos||[];let r=null;for(const p of L)if(p&&p.esc===e&&p.ini<=d&&d<=p.fim)r=p;return r}
 let stateVer=0;const mudou=()=>{stateVer++};
 const store={
   async setMilitar(id,data){mudou();if(db)await db.doc('militares/'+id).set(data);state.militares[id]={...data,id}},
@@ -355,7 +358,7 @@ function simulate(fim,opt={}){
       for(let k=1;k<=Math.max(1,dep);k++)if(S.has(addDays(d,k)))return 'PSV'}return null};  // entra de serviço lá logo depois
   const ini0=ESC[E]&&ESC[E].inicio&&ESC[E].inicio>c.inicio?ESC[E].inicio:c.inicio;
   for(let d=ini0;d<=fim;d=addDays(d,1)){
-    const ov=getOv(d,E),cd=corDia(d),cor=ov?.cor||cd.cor,N=c.nDia(cor);
+    const ov=getOv(d,E),cd=corDia(d),cor=ov?.cor||cd.cor,N=c.nDiaD(d,cor);
     const emenda=ESC[E].soUteis&&ESC[E].emenda;
     if(ESC[E].soUteis&&cor==='V'&&!emenda){days.push({d,cor,motivo:cd.motivo,ids:[],ov:null,reduced:[],deficit:0,af:{},apr:{},obr:{},pre:null,folgaDia:true});continue}
     const ativos=mils.filter(m=>(!m.entrada||m.entrada<=d)&&(!m.saida||d<m.saida));
@@ -397,7 +400,7 @@ function simulate(fim,opt={}){
     const emd=emenda&&cor==='V';
     for(const m of ativos){const s=st[m.id];if(S.has(m.id)){if(!emd)s[cor]=0}else if(!emd)s[cor]++;if(F.has(m.id))s.last=d}  // folga conta inclusive afastado; na emenda a folga fica parada
     if(emd&&pre){const pv=days.length?days[days.length-1].ids:[];for(const id of ids)if(pre[id]&&pv.includes(id))pre[id].rest=false}  // continuação do mesmo serviço
-    days.push({d,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,tit,ov,reduced,deficit,af,apr,obr,bq,bqE,pre,emenda:emd||undefined});
+    days.push({d,N,cor,motivo:(ov?.cor&&ov.cor!==cd.cor)?null:cd.motivo,ids,tit,ov,reduced,deficit,af,apr,obr,bq,bqE,pre,emenda:emd||undefined});
     if(opt.after===d)after=clone(st);
   }
   return{days,st,before,after};
@@ -574,7 +577,7 @@ function viewHojeEsc(){
   const prox=sim.days.filter(x=>x.d>base).slice(0,7);
   const b=sim.before;
   let roster='';
-  for(let i=0;i<Math.max(c.nDia(day.cor),day.ids.length);i++){
+  for(let i=0;i<Math.max(day.N??c.nDia(day.cor),day.ids.length);i++){
     const id=day.ids[i];
     if(!id){roster+=`<li class="vazio"><span class="grad">—</span><span class="nm">Vaga sem militar</span><span class="meta">efetivo insuficiente</span></li>`;continue}
     const m=state.militares[id],f=b.st[id]?.[day.cor];
@@ -584,7 +587,7 @@ function viewHojeEsc(){
   const ativos=b.ativos.length,afast=Object.keys(b.af).length;
   const desc=b.ativos.filter(m=>!b.af[m.id]&&b.st[m.id].last&&diff(b.st[m.id].last,base)<=c.descanso&&!day.ids.includes(m.id));
   const disp=ativos-afast;
-  const nHoje=c.nDia(day.cor);const folgaPrev=disp>0?Math.max(0,disp/nHoje-1):0;
+  const nHoje=Math.max(1,day.N??c.nDia(day.cor));const folgaPrev=disp>0?Math.max(0,disp/nHoje-1):0;
   const afList=b.ativos.filter(m=>b.af[m.id]).map(m=>{const a=b.af[m.id];return `<li><span>${esc(nome(m.id))}</span><span class="tag bad">${esc(a.tipo)}${a.fim?' · apresenta-se '+br(addDays(a.fim,1)):''}</span></li>`}).join('');
   const alertas=sim.days.filter(x=>x.d>=base&&(x.deficit>0||x.reduced.length)).slice(0,8)
     .map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.deficit>0?`<span class="tag bad">faltam ${x.deficit}</span>`:''} ${x.reduced.length?`<span class="tag warn">${x.reduced.length} com descanso reduzido</span>`:''}</span></li>`).join('');
@@ -679,7 +682,7 @@ function quadroDados(){
   // conferência de cada dia
   for(const x of days){
     const p=x.pre||{},prob=[];
-    const N=c.nDia(x.cor);if(x.ids.length!==N)prob.push(`${x.ids.length} escalados (deveriam ser ${N})`);
+    const N=x.N??c.nDia(x.cor);if(x.ids.length!==N)prob.push(`${x.ids.length} escalados (deveriam ser ${N})`);
     for(const id of x.ids){const q=p[id];if(!q){prob.push(nome(id)+' não está na escala nesse dia');continue}
       if(q.af)prob.push(`${nome(id)} escalado durante ${q.af.tipo.toLowerCase()}`);
       if(q.rest)prob.push(`${nome(id)} com menos de ${c.descanso*24} h de descanso (serviço em ${br(q.last)})`);
@@ -716,7 +719,7 @@ function viewQuadro(){
       return `<td class="${q.rest?'rest':''}" title="${esc(`Folga ${x.cor==='P'?'preta':'vermelha'}: ${q.f}${q.rest?' · em descanso':''}`)}">${q.f}</td>`}).join('');
     const k=tot[m.id]||{P:0,V:0};
     return `<tr><th class="nm" scope="row"><span class="mono muted">${m.ordem}</span> ${esc(nome(m.id))}${m.id===ui.pvM?' ◂':''}</th>${cells}<td class="sum">${k.P}</td><td class="sum">${k.V}</td><td class="sum"><b>${k.P+k.V}</b></td></tr>`}).join('');
-  const contagem=days.map(x=>`<td class="${x.ids.length===c.nDia(x.cor)?'ok':'bad'}">${x.ids.length}</td>`).join('');
+  const contagem=days.map(x=>`<td class="${x.ids.length===(x.N??c.nDia(x.cor))?'ok':'bad'}" ${periodoDe(ui.esc,x.d)?'title="efetivo programado para o período"':''}>${x.ids.length}</td>`).join('');
   const confere=days.map(x=>`<td class="${x.prob.length?'bad':'ok'}" title="${esc(x.prob.join(' | ')||'Dia conferido')}" data-act="editDay" data-d="${x.d}">${x.prob.length?'!':'✓'}</td>`).join('');
   const totP=days.filter(x=>x.cor==='P').length,totV=days.length-totP;
   const probs=days.filter(x=>x.prob.length);
@@ -732,7 +735,7 @@ function viewQuadro(){
     <div class="q-wrap"><table class="q">
       <thead><tr><th class="nm corner" rowspan="2">Militar</th>${head1}<th class="sum" rowspan="2" title="Serviços pretos">P</th><th class="sum" rowspan="2" title="Serviços vermelhos">V</th><th class="sum" rowspan="2">Tot</th></tr><tr>${head2}</tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><th class="nm">Escalados no dia</th>${contagem}<td class="sum">${totP*c.porDia}</td><td class="sum">${totV*c.porDiaV}</td><td class="sum"></td></tr>
+      <tfoot><tr><th class="nm">Escalados no dia</th>${contagem}<td class="sum">${days.filter(x=>x.cor==='P').reduce((a,x)=>a+(x.N??0),0)}</td><td class="sum">${days.filter(x=>x.cor==='V').reduce((a,x)=>a+(x.N??0),0)}</td><td class="sum"></td></tr>
       <tr><th class="nm">Conferência</th>${confere}<td class="sum" colspan="3"></td></tr></tfoot>
     </table></div>
     <p class="hint" style="margin-top:8px">Clique no número do dia para trocar militares. Dias antes de ${brY(c.inicio)} (início da contagem) não aparecem.</p>
@@ -805,6 +808,11 @@ function viewAjustes(){
     ${ESC_ORDEM.map(e=>`<tr><td><b>${esc(ESC[e].nome)}</b>${ESC[e].extra?' <span class="tag">criada</span>':''}${ESC[e].soUteis?`<div class="small muted">${ESC[e].emenda?'quem tira o dia útil antes segue no fim de semana/feriado':'só dias úteis'}</div>`:''}</td><td class="num mono">${porDiaDe(e,'P')}</td><td class="num mono">${ESC[e].soUteis?(ESC[e].emenda?'emenda':'—'):porDiaDe(e,'V')}</td><td class="num mono">${milsEsc(e).length}</td><td>${state.canWrite?`<button class="btn sm" data-act="editEscala" data-e="${e}">Editar</button>`:''}</td></tr>`).join('')}
     ${EXT_ORDEM.map(e=>`<tr><td><b>${esc(EXT[e].nome)}</b><div class="small muted">só registro: aparece na previsão quando alguém da Cia é escalado</div></td><td class="num mono">—</td><td class="num mono">—</td><td class="num mono">—</td><td>${state.canWrite?`<button class="btn sm" data-act="editEscExt" data-e="${e}">Editar</button>`:''}</td></tr>`).join('')}
     </tbody></table></div></section>
+  <section class="card"><div class="spread"><h2>Efetivo por período</h2>${state.canWrite?'<button class="btn sm pri" data-act="novoPeriodo">Programar período</button>':''}</div>
+    <p class="small muted" style="margin:6px 0 10px">Para dias em que entram mais ou menos militares que o normal (ex.: de 01/11 a 10/11 só 1 guarda). Terminado o período, volta sozinho ao padrão da escala.</p>
+    ${(()=>{const L=(c.periodos||[]).filter(p=>p&&ESC[p.esc]).sort((a,b)=>a.ini<b.ini?-1:1);const t=today();
+      return L.length?`<div class="tbl-wrap"><table><thead><tr><th>Escala</th><th>Período</th><th class="num">Preta</th><th class="num">Vermelha</th><th>Situação</th><th></th></tr></thead><tbody>${L.map(p=>`<tr><td><b>${esc(ESC[p.esc].nome)}</b>${p.obs?`<div class="small muted">${esc(p.obs)}</div>`:''}</td><td class="mono small" style="white-space:nowrap">${br(p.ini)} a ${br(p.fim)}</td><td class="num mono">${p.P}</td><td class="num mono">${ESC[p.esc].soUteis&&!ESC[p.esc].emenda?'—':(p.V??p.P)}</td><td>${p.fim<t?'<span class="tag">encerrado</span>':p.ini<=t?'<span class="tag ok">valendo</span>':'<span class="tag info">programado</span>'}</td><td>${state.canWrite?`<button class="btn sm" data-act="editPeriodo" data-id="${p.id}">Editar</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<p class="small muted">Nenhum período programado. Todas as escalas usam o efetivo padrão.</p>'})()}
+  </section>
   <section class="card"><h2>Feriados (escala vermelha)</h2>
     <p class="small muted" style="margin:6px 0 10px">Os feriados nacionais são calculados sozinhos, inclusive Carnaval e Corpus Christi. Desmarque os que a sua OM não considera. Acrescente os feriados municipais e estaduais abaixo.</p>
     <label class="row small"><input type="checkbox" id="cf-nac" ${c.feriadosNacionais!==false?'checked':''}> Usar feriados nacionais</label>
@@ -896,6 +904,15 @@ function dlgAfast(id,milId){
   <label class="f">Observação<input id="af-o" value="${esc(a?.obs||'')}" placeholder="Ex.: BI nº 190, atestado de 5 dias"></label>
   ${foot(a?'<button type="button" class="btn danger" data-act="delAfast">Excluir</button>':'')}`,{id});
 }
+function dlgPeriodo(id){const L=state.config.periodos||[],p=id?L.find(x=>x.id===id):null,e=p?.esc||'guarda',t=today();
+  openDlg('periodo',`<h2>${p?'Editar período':'Programar efetivo por período'}</h2>
+  <label class="f">Escala<select id="pe-esc">${ESC_ORDEM.map(x=>`<option value="${x}" ${x===e?'selected':''}>${esc(ESC[x].nome)} (padrão: ${esc(porDiaTxt(x))})</option>`).join('')}</select></label>
+  <div class="fgrid"><label class="f">De<input type="date" id="pe-ini" value="${p?.ini||t}"></label><label class="f">Até (inclusive)<input type="date" id="pe-fim" value="${p?.fim||addDays(t,6)}"></label></div>
+  <div class="fgrid"><label class="f">Escalados na preta<input type="number" id="pe-p" min="0" max="30" value="${p?.P??porDiaDe(e,'P')}"></label><label class="f">Escalados na vermelha<input type="number" id="pe-v" min="0" max="30" value="${p?.V??porDiaDe(e,'V')}"></label></div>
+  <label class="f">Motivo (opcional)<input id="pe-obs" value="${esc(p?.obs||'')}" placeholder="Ex.: efetivo reduzido por exercício"></label>
+  <p class="hint">Nos dias do período o app escala essa quantidade; antes e depois, o padrão da escala. Dias já passados ou ajustados à mão não mudam.</p>
+  ${foot(p?'<button type="button" class="btn danger" data-act="delPeriodo">Excluir</button>':'')}`,{id});
+}
 function dlgEscExt(e){const x=EXT[e];
   openDlg('escext',`<h2>Editar nome</h2><div class="fgrid"><label class="f">Nome<input id="ee-nome" value="${esc(x.nome)}" placeholder="${esc(NOME_PADRAO[e].nome)}"></label>
   <label class="f">Nome curto<input id="ee-curto" value="${esc(x.curto)}" placeholder="${esc(NOME_PADRAO[e].curto)}"></label></div><p class="hint">Nome original: ${esc(NOME_PADRAO[e].nome)}. Apague o campo para voltar a ele.</p>${foot()}`,{e});
@@ -916,7 +933,7 @@ function dlgDay(d){
     const fut=sim.days.find(x=>x.d>d&&x.d<=addDays(d,R)&&x.ids.includes(m.id));
     return{m,f:s[day.cor],a,rest,fut,l,apr:b.apr[m.id],obr:b.obr[m.id],bq:b.bq[m.id],bqe:b.bqE?.[m.id]}};
   const cands=b.ativos.map(info).sort((x,y)=>(!!y.obr-!!x.obr)||(!!x.a-!!y.a)||(!!x.apr-!!y.apr)||(!!x.rest-!!y.rest)||(y.f-x.f));
-  const N=Math.max(c.nDia(day.cor),day.ids.length);
+  const N=Math.max(day.N??c.nDia(day.cor),day.ids.length);
   const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.bq?' · '+bqTxt(k.bq,k.bqe):''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
     return `<option value="${k.m.id}" ${cur===k.m.id?'selected':''} ${k.a&&cur!==k.m.id?'disabled':''}>${esc(lab)}</option>`}).join('');
   const optT=(cur)=>`<option value="">Sem troca (ele mesmo tira)</option>`+cands.map(k=>`<option value="${k.m.id}" ${cur===k.m.id?'selected':''}>${esc(`${nome(k.m.id)}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.bq?' · '+bqTxt(k.bq,k.bqe):''}`)}</option>`).join('');
@@ -960,6 +977,8 @@ const actions={
       for(const [m,add] of Object.entries(byM))await store.setMonth(m,{...(state.meses[m]?.dias||{}),...add})},'Dias ajustados conforme a planilha')},
   async carregarDados(e){if(!window.ESCALA_DADOS)return;if(state.busy)return;e.disabled=true;e.textContent='Carregando…';await importarBackup(JSON.stringify(window.ESCALA_DADOS))},
   editEscExt:e=>dlgEscExt(e.dataset.e),
+  novoPeriodo:()=>dlgPeriodo(null),editPeriodo:e=>dlgPeriodo(e.dataset.id),
+  async delPeriodo(){const id=dlgData.id;const c={...state.config,periodos:(state.config.periodos||[]).filter(x=>x.id!==id)};closeDlg();await mutate(()=>store.setConfig(c),'Período excluído: volta ao padrão')},
   editExt:e=>{if(state.canWrite)dlgExt(e.dataset.d)},
   editDayEsc:e=>{if(ui.esc!==e.dataset.e){ui.esc=e.dataset.e;saveUi();render();setTimeout(()=>dlgDay(e.dataset.d),30)}else dlgDay(e.dataset.d)},
   carMove:e=>{const tr=$('#car-track');if(!tr)return;const c=tr.querySelector('.dcard');const w=c?c.getBoundingClientRect().width+12:300;const dir=+e.dataset.dir;
@@ -1026,6 +1045,13 @@ async function submitDlg(){
     const {d,cor}=dlgData,m=monthKey(ui.esc,d.slice(0,7));let obs=$('#dd-o').value.trim();
     const tx=Object.entries(trocas).map(([t,f])=>`${nome(f)} no lugar de ${nome(t)}`).join('; ');if(tx&&(!obs||obs==='Planilha da Cia'||obs.startsWith('Troca: ')))obs='Troca: '+tx;closeDlg();
     await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};dias[d]={ids,nomes:ids.map(i=>nome(i)),cor,manual:true,obs,...(tx?{trocas}:{})};await store.setMonth(m,dias)},tx?`Troca registrada: ${tx}`:`Escala de ${br(d)} ajustada`);
+  }else if(dlgKind==='periodo'){
+    const esc0=$('#pe-esc').value,ini=$('#pe-ini').value,fim=$('#pe-fim').value,P=parseInt($('#pe-p').value),V=parseInt($('#pe-v').value),obs=$('#pe-obs').value.trim();
+    if(!ini||!fim)return fail('Informe as datas.');if(fim<ini)return fail('A data final é antes da inicial.');if(!(P>=0)||!(V>=0))return fail('Informe quantos militares entram por dia.');
+    const id=dlgData.id||newId('pe'),L=(state.config.periodos||[]).filter(x=>x&&x.id!==id);
+    const sob=L.find(x=>x.esc===esc0&&x.ini<=fim&&ini<=x.fim);if(sob)return fail(`Já existe um período de ${ESC[esc0].nome} de ${br(sob.ini)} a ${br(sob.fim)} que se sobrepõe. Edite aquele ou mude as datas.`);
+    const c={...state.config,periodos:[...L,{id,esc:esc0,ini,fim,P,V,obs}]};closeDlg();
+    await mutate(()=>store.setConfig(c),`${ESC[esc0].nome}: ${P} na preta e ${V} na vermelha de ${br(ini)} a ${br(fim)}`);
   }else if(dlgKind==='escext'){
     const e=dlgData.e,c={...state.config},nm={...(c.nomesEscala||{})},n=$('#ee-nome').value.trim(),cu=$('#ee-curto').value.trim();
     if((!n||n===NOME_PADRAO[e].nome)&&(!cu||cu===NOME_PADRAO[e].curto))delete nm[e];else nm[e]={nome:n||NOME_PADRAO[e].nome,curto:cu||n||NOME_PADRAO[e].curto};c.nomesEscala=nm;
@@ -1060,6 +1086,7 @@ document.addEventListener('change',e=>{const id=e.target.id;
   else if(id==='pv-h'){ui.pvH=+e.target.value;saveUi();render()}
   else if(id==='pv-m'){ui.pvM=e.target.value;saveUi();render()}
   else if(id==='af-tipo'){ui.afTipo=e.target.value;render()}
+  else if(id==='pe-esc'&&!dlgData?.id){const x=e.target.value;$('#pe-p').value=porDiaDe(x,'P');$('#pe-v').value=porDiaDe(x,'V')}
   else if(id==='es-uteis'){const w=$('#es-v-wrap');if(w)w.hidden=e.target.checked;const w2=$('#es-emenda-wrap');if(w2)w2.hidden=!e.target.checked}
   else if(id==='pl-file'){const f=e.target.files&&e.target.files[0];if(!f)return;e.target.value='';
     (async()=>{try{toast('Lendo a planilha…');const X=await carregarXLSX();const P=lerPlanilha(X,await f.arrayBuffer());dlgPlanilha(P)}catch(err){console.error(err);toast('Não consegui ler esse arquivo. Exporte a planilha como Excel (.xlsx).')}})()}
