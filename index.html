@@ -904,13 +904,18 @@ function dlgAfast(id,milId){
   <label class="f">Observação<input id="af-o" value="${esc(a?.obs||'')}" placeholder="Ex.: BI nº 190, atestado de 5 dias"></label>
   ${foot(a?'<button type="button" class="btn danger" data-act="delAfast">Excluir</button>':'')}`,{id});
 }
+function linhaPeriodo(k,r){return `<div class="pe-row card" data-k="${k}" style="padding:10px;display:grid;gap:8px">
+  <div class="spread"><b class="small">Período ${k+1}</b>${k?`<button type="button" class="btn sm" data-act="delPeriodoLinha" data-k="${k}" aria-label="Remover período">✕</button>`:''}</div>
+  <div class="fgrid"><label class="f">De<input type="date" class="pe-ini" value="${r.ini}"></label><label class="f">Até (inclusive)<input type="date" class="pe-fim" value="${r.fim}"></label></div>
+  <div class="fgrid"><label class="f">Escalados na preta<input type="number" class="pe-p" min="0" max="30" value="${r.P}"></label><label class="f">Escalados na vermelha<input type="number" class="pe-v" min="0" max="30" value="${r.V}"></label></div>
+  <label class="f">Motivo (opcional)<input class="pe-obs" value="${esc(r.obs||'')}" placeholder="Ex.: efetivo reduzido por exercício"></label></div>`}
 function dlgPeriodo(id){const L=state.config.periodos||[],p=id?L.find(x=>x.id===id):null,e=p?.esc||'guarda',t=today();
+  const r0=p?{...p}:{ini:t,fim:addDays(t,6),P:porDiaDe(e,'P'),V:porDiaDe(e,'V')};
   openDlg('periodo',`<h2>${p?'Editar período':'Programar efetivo por período'}</h2>
   <label class="f">Escala<select id="pe-esc">${ESC_ORDEM.map(x=>`<option value="${x}" ${x===e?'selected':''}>${esc(ESC[x].nome)} (padrão: ${esc(porDiaTxt(x))})</option>`).join('')}</select></label>
-  <div class="fgrid"><label class="f">De<input type="date" id="pe-ini" value="${p?.ini||t}"></label><label class="f">Até (inclusive)<input type="date" id="pe-fim" value="${p?.fim||addDays(t,6)}"></label></div>
-  <div class="fgrid"><label class="f">Escalados na preta<input type="number" id="pe-p" min="0" max="30" value="${p?.P??porDiaDe(e,'P')}"></label><label class="f">Escalados na vermelha<input type="number" id="pe-v" min="0" max="30" value="${p?.V??porDiaDe(e,'V')}"></label></div>
-  <label class="f">Motivo (opcional)<input id="pe-obs" value="${esc(p?.obs||'')}" placeholder="Ex.: efetivo reduzido por exercício"></label>
-  <p class="hint">Nos dias do período o app escala essa quantidade; antes e depois, o padrão da escala. Dias já passados ou ajustados à mão não mudam.</p>
+  <div id="pe-rows" style="display:grid;gap:10px">${linhaPeriodo(0,r0)}</div>
+  <button type="button" class="btn" data-act="addPeriodoLinha" style="justify-self:start">+ Outro período</button>
+  <p class="hint">Crie quantos períodos quiser de uma vez (ex.: 01 a 05 com 1 guarda, 06 a 10 com 2, 11 a 15 com 3). Nos dias de cada período o app escala essa quantidade; fora deles, o padrão da escala. Dias já passados ou ajustados à mão não mudam.</p>
   ${foot(p?'<button type="button" class="btn danger" data-act="delPeriodo">Excluir</button>':'')}`,{id});
 }
 function dlgEscExt(e){const x=EXT[e];
@@ -977,7 +982,11 @@ const actions={
       for(const [m,add] of Object.entries(byM))await store.setMonth(m,{...(state.meses[m]?.dias||{}),...add})},'Dias ajustados conforme a planilha')},
   async carregarDados(e){if(!window.ESCALA_DADOS)return;if(state.busy)return;e.disabled=true;e.textContent='Carregando…';await importarBackup(JSON.stringify(window.ESCALA_DADOS))},
   editEscExt:e=>dlgEscExt(e.dataset.e),
-  novoPeriodo:()=>dlgPeriodo(null),editPeriodo:e=>dlgPeriodo(e.dataset.id),
+  novoPeriodo:()=>dlgPeriodo(null),
+  addPeriodoLinha:()=>{const box=$('#pe-rows');const rs=box.querySelectorAll('.pe-row'),last=rs[rs.length-1],e=$('#pe-esc').value;
+    const fim=last?.querySelector('.pe-fim').value||today(),ini=addDays(fim,1);box.insertAdjacentHTML('beforeend',linhaPeriodo(rs.length,{ini,fim:addDays(ini,6),P:porDiaDe(e,'P'),V:porDiaDe(e,'V')}));
+    box.lastElementChild.scrollIntoView({block:'nearest'})},
+  delPeriodoLinha:e=>{e.closest('.pe-row').remove();[...document.querySelectorAll('#pe-rows .pe-row')].forEach((r,k)=>{r.dataset.k=k;r.querySelector('b').textContent='Período '+(k+1)})},editPeriodo:e=>dlgPeriodo(e.dataset.id),
   async delPeriodo(){const id=dlgData.id;const c={...state.config,periodos:(state.config.periodos||[]).filter(x=>x.id!==id)};closeDlg();await mutate(()=>store.setConfig(c),'Período excluído: volta ao padrão')},
   editExt:e=>{if(state.canWrite)dlgExt(e.dataset.d)},
   editDayEsc:e=>{if(ui.esc!==e.dataset.e){ui.esc=e.dataset.e;saveUi();render();setTimeout(()=>dlgDay(e.dataset.d),30)}else dlgDay(e.dataset.d)},
@@ -1046,12 +1055,16 @@ async function submitDlg(){
     const tx=Object.entries(trocas).map(([t,f])=>`${nome(f)} no lugar de ${nome(t)}`).join('; ');if(tx&&(!obs||obs==='Planilha da Cia'||obs.startsWith('Troca: ')))obs='Troca: '+tx;closeDlg();
     await mutate(async()=>{const dias={...(state.meses[m]?.dias||{})};dias[d]={ids,nomes:ids.map(i=>nome(i)),cor,manual:true,obs,...(tx?{trocas}:{})};await store.setMonth(m,dias)},tx?`Troca registrada: ${tx}`:`Escala de ${br(d)} ajustada`);
   }else if(dlgKind==='periodo'){
-    const esc0=$('#pe-esc').value,ini=$('#pe-ini').value,fim=$('#pe-fim').value,P=parseInt($('#pe-p').value),V=parseInt($('#pe-v').value),obs=$('#pe-obs').value.trim();
-    if(!ini||!fim)return fail('Informe as datas.');if(fim<ini)return fail('A data final é antes da inicial.');if(!(P>=0)||!(V>=0))return fail('Informe quantos militares entram por dia.');
-    const id=dlgData.id||newId('pe'),L=(state.config.periodos||[]).filter(x=>x&&x.id!==id);
-    const sob=L.find(x=>x.esc===esc0&&x.ini<=fim&&ini<=x.fim);if(sob)return fail(`Já existe um período de ${ESC[esc0].nome} de ${br(sob.ini)} a ${br(sob.fim)} que se sobrepõe. Edite aquele ou mude as datas.`);
-    const c={...state.config,periodos:[...L,{id,esc:esc0,ini,fim,P,V,obs}]};closeDlg();
-    await mutate(()=>store.setConfig(c),`${ESC[esc0].nome}: ${P} na preta e ${V} na vermelha de ${br(ini)} a ${br(fim)}`);
+    const esc0=$('#pe-esc').value,rows=[...document.querySelectorAll('#pe-rows .pe-row')];
+    const novos=[];
+    for(const [k,el] of rows.entries()){const q=c=>el.querySelector(c).value;const ini=q('.pe-ini'),fim=q('.pe-fim'),P=parseInt(q('.pe-p')),V=parseInt(q('.pe-v')),obs=q('.pe-obs').trim(),n=`Período ${k+1}: `;
+      if(!ini||!fim)return fail(n+'informe as datas.');if(fim<ini)return fail(n+'a data final é antes da inicial.');if(!(P>=0)||!(V>=0))return fail(n+'informe quantos militares entram por dia.');
+      novos.push({id:k===0&&dlgData.id?dlgData.id:newId('pe'),esc:esc0,ini,fim,P,V,obs})}
+    const L=(state.config.periodos||[]).filter(x=>x&&x.id!==dlgData.id);
+    for(const [k,a] of novos.entries()){const sob=L.find(x=>x.esc===esc0&&x.ini<=a.fim&&a.ini<=x.fim);if(sob)return fail(`Período ${k+1}: já existe um período de ${ESC[esc0].nome} de ${br(sob.ini)} a ${br(sob.fim)} que se sobrepõe. Edite aquele ou mude as datas.`);
+      const s2=novos.findIndex((b,j)=>j!==k&&b.ini<=a.fim&&a.ini<=b.fim);if(s2>=0)return fail(`Os períodos ${Math.min(k,s2)+1} e ${Math.max(k,s2)+1} têm datas que se sobrepõem.`)}
+    const c={...state.config,periodos:[...L,...novos]};closeDlg();
+    await mutate(()=>store.setConfig(c),novos.length>1?`${novos.length} períodos programados em ${ESC[esc0].nome}`:`${ESC[esc0].nome}: ${novos[0].P} na preta e ${novos[0].V} na vermelha de ${br(novos[0].ini)} a ${br(novos[0].fim)}`);
   }else if(dlgKind==='escext'){
     const e=dlgData.e,c={...state.config},nm={...(c.nomesEscala||{})},n=$('#ee-nome').value.trim(),cu=$('#ee-curto').value.trim();
     if((!n||n===NOME_PADRAO[e].nome)&&(!cu||cu===NOME_PADRAO[e].curto))delete nm[e];else nm[e]={nome:n||NOME_PADRAO[e].nome,curto:cu||n||NOME_PADRAO[e].curto};c.nomesEscala=nm;
@@ -1086,7 +1099,7 @@ document.addEventListener('change',e=>{const id=e.target.id;
   else if(id==='pv-h'){ui.pvH=+e.target.value;saveUi();render()}
   else if(id==='pv-m'){ui.pvM=e.target.value;saveUi();render()}
   else if(id==='af-tipo'){ui.afTipo=e.target.value;render()}
-  else if(id==='pe-esc'&&!dlgData?.id){const x=e.target.value;$('#pe-p').value=porDiaDe(x,'P');$('#pe-v').value=porDiaDe(x,'V')}
+  else if(id==='pe-esc'&&!dlgData?.id){const x=e.target.value;document.querySelectorAll('#pe-rows .pe-p').forEach(i=>i.value=porDiaDe(x,'P'));document.querySelectorAll('#pe-rows .pe-v').forEach(i=>i.value=porDiaDe(x,'V'))}
   else if(id==='es-uteis'){const w=$('#es-v-wrap');if(w)w.hidden=e.target.checked;const w2=$('#es-emenda-wrap');if(w2)w2.hidden=!e.target.checked}
   else if(id==='pl-file'){const f=e.target.files&&e.target.files[0];if(!f)return;e.target.value='';
     (async()=>{try{toast('Lendo a planilha…');const X=await carregarXLSX();const P=lerPlanilha(X,await f.arrayBuffer());dlgPlanilha(P)}catch(err){console.error(err);toast('Não consegui ler esse arquivo. Exporte a planilha como Excel (.xlsx).')}})()}
