@@ -318,6 +318,7 @@ function cfg(e){e=e||(typeof ui!=='undefined'?ui.esc:'guarda');const c={...DEFAU
   // efetivo programado por período (Ajustes → Efetivo por período): vale do dia "de" ao dia "até"; fora disso, o padrão
   c.nDiaD=(d,cor)=>{const p=periodoDe(e,d,c);if(!p)return c.nDia(cor);if(cor==='V'&&ESC[e].soUteis&&!ESC[e].emenda)return 0;return Math.max(0,+(cor==='V'?(p.V??p.P):p.P)||0)};c.descanso=Math.max(0,parseInt(c.descanso));if(isNaN(c.descanso))c.descanso=2;return c}
 function periodoDe(e,d,c){const L=(c||state.config).periodos||[];let r=null;for(const p of L)if(p&&p.esc===e&&p.ini<=d&&d<=p.fim)r=p;return r}
+const FD=f=>f==null?f:f+1;  // folga mostrada: o 1º dia depois do serviço é 1 (como na planilha da Cia); internamente começa em 0
 let stateVer=0;const mudou=()=>{stateVer++};
 const store={
   async setMilitar(id,data){mudou();if(db)await db.doc('militares/'+id).set(data);state.militares[id]={...data,id}},
@@ -582,12 +583,12 @@ function viewHojeEsc(){
     if(!id){roster+=`<li class="vazio"><span class="grad">—</span><span class="nm">Vaga sem militar</span><span class="meta">efetivo insuficiente</span></li>`;continue}
     const m=state.militares[id],f=b.st[id]?.[day.cor];
     roster+=`<li><span class="grad">${esc(m?.grad||'')}</span><span class="nm ${day.reduced.includes(id)?'reduz':''}">${esc(m?m.nome:nomeDia(day,i))}</span>
-      <span class="meta">${f!=null?`folga ${f} ${day.cor==='P'?'preta':'verm.'}`:''}${day.reduced.includes(id)?'<br><span class="tag warn">descanso reduzido</span>':''}</span></li>`}
+      <span class="meta">${f!=null?`folga ${FD(f)} ${day.cor==='P'?'preta':'verm.'}`:''}${day.reduced.includes(id)?'<br><span class="tag warn">descanso reduzido</span>':''}</span></li>`}
   // efetivo
   const ativos=b.ativos.length,afast=Object.keys(b.af).length;
   const desc=b.ativos.filter(m=>!b.af[m.id]&&b.st[m.id].last&&diff(b.st[m.id].last,base)<=c.descanso&&!day.ids.includes(m.id));
   const disp=ativos-afast;
-  const nHoje=Math.max(1,day.N??c.nDia(day.cor));const folgaPrev=disp>0?Math.max(0,disp/nHoje-1):0;
+  const nHoje=Math.max(1,day.N??c.nDia(day.cor));const folgaPrev=disp>0?Math.max(0,disp/nHoje-1)+1:1;
   const afList=b.ativos.filter(m=>b.af[m.id]).map(m=>{const a=b.af[m.id];return `<li><span>${esc(nome(m.id))}</span><span class="tag bad">${esc(a.tipo)}${a.fim?' · apresenta-se '+br(addDays(a.fim,1)):''}</span></li>`}).join('');
   const alertas=sim.days.filter(x=>x.d>=base&&(x.deficit>0||x.reduced.length)).slice(0,8)
     .map(x=>`<li><span class="mono">${DOW[dow(x.d)]} ${br(x.d)}</span><span>${x.deficit>0?`<span class="tag bad">faltam ${x.deficit}</span>`:''} ${x.reduced.length?`<span class="tag warn">${x.reduced.length} com descanso reduzido</span>`:''}</span></li>`).join('');
@@ -693,7 +694,7 @@ function quadroDados(){
     const acc=x.ids.map(i=>x.tit?.[i]||i);   // troca: a ordem de folga se confere pelo titular
     const fora=eleg.filter(([id])=>!acc.includes(id)&&!x.ids.includes(id)),dentro=acc.map(id=>p[id]).filter(q=>q&&!q.af&&!q.rest&&!q.obr&&!q.apr);
     if(fora.length&&dentro.length&&!x.emenda){const maxF=Math.max(...fora.map(([,q])=>q.f)),minD=Math.min(...dentro.map(q=>q.f));
-      if(maxF>minD){const quem=fora.filter(([,q])=>q.f>minD).map(([id,q])=>`${nome(id)} (${q.f})`);prob.push(`Fora da ordem de folga: ficou de fora ${quem.join(', ')}, mais folgado que quem entrou (${minD})`)}}
+      if(maxF>minD){const quem=fora.filter(([,q])=>q.f>minD).map(([id,q])=>`${nome(id)} (${FD(q.f)})`);prob.push(`Fora da ordem de folga: ficou de fora ${quem.join(', ')}, mais folgado que quem entrou (${FD(minD)})`)}}
     x.prob=prob;
   }
   return{mes,rol,first,lastD,days,mils};
@@ -710,13 +711,13 @@ function viewQuadro(){
       if(!q)return '<td class="fora"></td>';
       const inS=x.ids.includes(m.id),tPor=x.tit&&Object.entries(x.tit).find(([f,t])=>t===m.id)?.[0];
       if(tPor)return `<td class="s ${x.cor} tit" title="${esc(`Serviço contado para ele (folga zera) · tirado por ${nome(tPor)} (troca)`)}">S</td>`;
-      if(inS&&x.tit?.[m.id]){const v=q.af||q.rest||q.apr||q.bq;return `<td class="tr ${v?'viol':''}" title="${esc(`Tirou o serviço de ${nome(x.tit[m.id])} (troca) · não conta para ele, folga segue ${q.f}${q.rest?' · descanso insuficiente':''}`)}">TR</td>`}
-      if(inS){const v=q.af||q.rest||q.apr||q.bq;return `<td class="s ${x.cor} ${v?'viol':''}" title="${esc(`Serviço ${x.cor==='P'?'preto':'vermelho'} · folga ${q.f}${q.obr?' · retorno de afastamento':''}${q.rest?' · descanso insuficiente':''}${q.af?' · afastado':''}${q.apr?' · dia da apresentação':''}`)}">S</td>`}
-      if(q.af)return `<td class="af" title="${esc(q.af.tipo+' · folga '+q.f)}">${AFCOD[q.af.tipo]||'AF'}</td>`;
-      if(q.apr)return `<td class="apr" title="${esc('Apresentação · folga '+q.f)}">AP</td>`;
-      if(q.bq)return `<td class="apr" title="${esc(bqTxt(q.bq,q.bqe)+' · folga '+q.f)}">${BQ[q.bq][0]}</td>`;
-      if(q.obr)return `<td class="af viol" title="Deveria estar de serviço">${q.f}</td>`;
-      return `<td class="${q.rest?'rest':''}" title="${esc(`Folga ${x.cor==='P'?'preta':'vermelha'}: ${q.f}${q.rest?' · em descanso':''}`)}">${q.f}</td>`}).join('');
+      if(inS&&x.tit?.[m.id]){const v=q.af||q.rest||q.apr||q.bq;return `<td class="tr ${v?'viol':''}" title="${esc(`Tirou o serviço de ${nome(x.tit[m.id])} (troca) · não conta para ele, folga segue ${FD(q.f)}${q.rest?' · descanso insuficiente':''}`)}">TR</td>`}
+      if(inS){const v=q.af||q.rest||q.apr||q.bq;return `<td class="s ${x.cor} ${v?'viol':''}" title="${esc(`Serviço ${x.cor==='P'?'preto':'vermelho'} · folga ${FD(q.f)}${q.obr?' · retorno de afastamento':''}${q.rest?' · descanso insuficiente':''}${q.af?' · afastado':''}${q.apr?' · dia da apresentação':''}`)}">S</td>`}
+      if(q.af)return `<td class="af" title="${esc(q.af.tipo+' · folga '+FD(q.f))}">${AFCOD[q.af.tipo]||'AF'}</td>`;
+      if(q.apr)return `<td class="apr" title="${esc('Apresentação · folga '+FD(q.f))}">AP</td>`;
+      if(q.bq)return `<td class="apr" title="${esc(bqTxt(q.bq,q.bqe)+' · folga '+FD(q.f))}">${BQ[q.bq][0]}</td>`;
+      if(q.obr)return `<td class="af viol" title="Deveria estar de serviço">${FD(q.f)}</td>`;
+      return `<td class="${q.rest?'rest':''}" title="${esc(`Folga ${x.cor==='P'?'preta':'vermelha'}: ${FD(q.f)}${q.rest?' · em descanso':''}`)}">${FD(q.f)}</td>`}).join('');
     const k=tot[m.id]||{P:0,V:0};
     return `<tr><th class="nm" scope="row"><span class="mono muted">${m.ordem}</span> ${esc(nome(m.id))}${m.id===ui.pvM?' ◂':''}</th>${cells}<td class="sum">${k.P}</td><td class="sum">${k.V}</td><td class="sum"><b>${k.P+k.V}</b></td></tr>`}).join('');
   const contagem=days.map(x=>`<td class="${x.ids.length===(x.N??c.nDia(x.cor))?'ok':'bad'}" ${periodoDe(ui.esc,x.d)?'title="efetivo programado para o período"':''}>${x.ids.length}</td>`).join('');
@@ -744,7 +745,7 @@ function viewQuadro(){
 function quadroTexto(){
   const {days,mils}=quadroDados();
   const lines=[['Militar',...days.map(x=>`${br(x.d)} ${DOW[dow(x.d)]}`),'Pretos','Vermelhos','Total'].join('\t')];
-  for(const m of mils){let P=0,V=0;const cs=days.map(x=>{const q=x.pre?.[m.id];if(!q)return '';if(x.ids.includes(m.id)){x.cor==='P'?P++:V++;return 'S'}if(q.af)return AFCOD[q.af.tipo]||'AF';return String(q.f)});
+  for(const m of mils){let P=0,V=0;const cs=days.map(x=>{const q=x.pre?.[m.id];if(!q)return '';if(x.ids.includes(m.id)){x.cor==='P'?P++:V++;return 'S'}if(q.af)return AFCOD[q.af.tipo]||'AF';return String(FD(q.f))});
     lines.push([nome(m.id),...cs,P,V,P+V].join('\t'))}
   lines.push(['Escalados',...days.map(x=>x.ids.length)].join('\t'));
   lines.push(['Conferência',...days.map(x=>x.prob.length?'ERRO':'OK')].join('\t'));
@@ -761,7 +762,7 @@ function viewMilitares(){
   const st=sim.after||{};
   const rows=mils.map(m=>{const s=situacao(m.id,sim,base),f=st[m.id],p=prox[m.id];
     return `<tr><td class="num mono">${m.ordem}</td><td class="mono small">${esc(m.grad||'')}</td><td><b>${esc(m.nome)}</b>${m.exemplo?' <span class="tag">exemplo</span>':''}</td>
-    <td><span class="tag ${s.cls}">${esc(s.txt)}</span></td><td class="num mono">${f?f.P:'—'}</td><td class="num mono">${f?f.V:'—'}</td>
+    <td><span class="tag ${s.cls}">${esc(s.txt)}</span></td><td class="num mono">${f?FD(f.P):'—'}</td><td class="num mono">${f?FD(f.V):'—'}</td>
     <td class="mono small">${f?.last?br(f.last):'—'}</td><td class="small" style="white-space:nowrap">${p?`<span class="mono">${DOW[dow(p.d)]} ${br(p.d)}</span> <span class="chip ${p.cor}" style="font-size:.7rem">${p.cor==='P'?'P':'V'}</span>`:'—'}</td>
     <td style="white-space:nowrap"><button class="btn sm" data-act="editMil" data-id="${m.id}">Editar</button> <button class="btn sm" data-act="novoAfast" data-id="${m.id}">Afastar</button></td></tr>`}).join('');
   const ex=mils.some(m=>m.exemplo);
@@ -879,8 +880,8 @@ function dlgMilitar(id){
   <datalist id="grads">${GRADS.map(g=>`<option value="${g}">`).join('')}</datalist>
   <div class="fgrid"><label class="f">Entra na escala em<input type="date" id="mi-ent" value="${m?.entrada||today()}"></label>
   <label class="f">Sai da escala em<input type="date" id="mi-sai" value="${m?.saida||''}"><span class="hint">Opcional. Transferência, baixa etc.</span></label></div>
-  <div class="fgrid"><label class="f">Folga inicial preta<input type="number" min="0" id="mi-fp" value="${m?.folgaIniP??0}"></label>
-  <label class="f">Folga inicial vermelha<input type="number" min="0" id="mi-fv" value="${m?.folgaIniV??0}"></label>
+  <div class="fgrid"><label class="f">Folga inicial preta<input type="number" min="1" id="mi-fp" value="${FD(m?.folgaIniP??0)}"></label>
+  <label class="f">Folga inicial vermelha<input type="number" min="1" id="mi-fv" value="${FD(m?.folgaIniV??0)}"></label>
   <label class="f">Último serviço antes do início<input type="date" id="mi-ult" value="${m?.ultimoIni||''}"><span class="hint">Opcional. Garante as 48 h de descanso nos primeiros dias.</span></label></div>
   <p class="hint">A folga inicial vale na data de entrada (ou no início da contagem). Folga 0 coloca o militar no fim da fila; uma folga alta faz ele ser escalado logo.</p>
   ${foot(m?'<button type="button" class="btn danger" data-act="delMil">Excluir</button>':'')}`,{id});
@@ -939,7 +940,7 @@ function dlgDay(d){
     return{m,f:s[day.cor],a,rest,fut,l,apr:b.apr[m.id],obr:b.obr[m.id],bq:b.bq[m.id],bqe:b.bqE?.[m.id]}};
   const cands=b.ativos.map(info).sort((x,y)=>(!!y.obr-!!x.obr)||(!!x.a-!!y.a)||(!!x.apr-!!y.apr)||(!!x.rest-!!y.rest)||(y.f-x.f));
   const N=Math.max(day.N??c.nDia(day.cor),day.ids.length);
-  const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${k.f}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.bq?' · '+bqTxt(k.bq,k.bqe):''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
+  const opt=(cur)=>`<option value="">— vago —</option>`+cands.map(k=>{const lab=`${nome(k.m.id)} · folga ${FD(k.f)}${k.obr?' · retorno: serviço obrigatório':''}${k.apr?' · dia da apresentação':''}${k.bq?' · '+bqTxt(k.bq,k.bqe):''}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.fut?' · escalado '+br(k.fut.d):''}`;
     return `<option value="${k.m.id}" ${cur===k.m.id?'selected':''} ${k.a&&cur!==k.m.id?'disabled':''}>${esc(lab)}</option>`}).join('');
   const optT=(cur)=>`<option value="">Sem troca (ele mesmo tira)</option>`+cands.map(k=>`<option value="${k.m.id}" ${cur===k.m.id?'selected':''}>${esc(`${nome(k.m.id)}${k.a?' · '+k.a.tipo:''}${k.rest?' · descanso (serv. '+br(k.l)+')':''}${k.bq?' · '+bqTxt(k.bq,k.bqe):''}`)}</option>`).join('');
   const slots=Array.from({length:N},(_,i)=>{const f=day.ids[i]||'',t=day.tit?.[f];return `<div class="slot"><span class="n">${i+1}</span><select class="ctl" id="dd-s${i}" aria-label="Escalado ${i+1}">${opt(t||f)}</select><label class="troca"><span>Troca de serviço: quem tira no lugar</span><select class="ctl" id="dd-t${i}">${optT(t?f:'')}</select></label></div>`}).join('');
@@ -1027,7 +1028,7 @@ async function submitDlg(){
     const id=dlgData.id||newId('m'),old=state.militares[id]||{};
     const ent=$('#mi-ent').value||today(),sai=$('#mi-sai').value||null;if(sai&&sai<=ent)return fail('A saída precisa ser depois da entrada.');
     const data={escala:$('#mi-esc').value,ordem:parseInt($('#mi-ord').value)||1,grad:$('#mi-grad').value.trim(),nome:nomeV,entrada:ent,saida:sai,
-      folgaIniP:Math.max(0,parseInt($('#mi-fp').value)||0),folgaIniV:Math.max(0,parseInt($('#mi-fv').value)||0),ultimoIni:$('#mi-ult').value||null,ref:$('#mi-ref').value||null,
+      folgaIniP:Math.max(0,(parseInt($('#mi-fp').value)||1)-1),folgaIniV:Math.max(0,(parseInt($('#mi-fv').value)||1)-1),ultimoIni:$('#mi-ult').value||null,ref:$('#mi-ref').value||null,
       exemplo:!!old.exemplo&&old.nome===nomeV&&old.grad===$('#mi-grad').value.trim()};
     closeDlg();await mutate(()=>store.setMilitar(id,data),dlgData.id?'Militar atualizado':'Militar adicionado');
   }else if(dlgKind==='imp'){
