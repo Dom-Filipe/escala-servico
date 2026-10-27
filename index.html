@@ -646,7 +646,7 @@ function viewPrevisao(){
   const P=state.plan[ui.esc];const difs=P?days.filter(x=>x.d>=t&&difPlan(ui.esc,x)):[];
   const banPlan=P?`<div class="banner" style="background:${difs.length?'var(--warn-soft)':'var(--accent-soft)'}"><span><b>Planilha da Cia</b> (atualizada em ${brY(P.atualizado||'')}, preenchida até ${br(P.horizonte||'')}): ${difs.length?`${difs.length} dia(s) em que o app sugere militares diferentes da planilha. A planilha vale para os dias já publicados; o app sugere os seguintes.`:'o app está igual à planilha em todos os dias preenchidos.'}</span>${difs.length&&state.canWrite?'<button class="btn sm" data-act="usarPlanTodos">Usar a planilha nesses dias</button>':''}</div>`:'';
   return banPlan+cartoesDias(ini,Math.min(ui.pvH,90))+`<section class="card">
-    <div class="spread"><h2>Previsão · ${ESC[ui.esc].nome}</h2><div class="row">${downloads?'<button class="btn sm" data-act="csv">Baixar planilha (CSV)</button>':''}<button class="btn sm" data-act="copiar">Copiar tabela</button></div></div>
+    <div class="spread"><h2>Previsão · ${ESC[ui.esc].nome}</h2><div class="row"><button class="btn sm pri" data-act="exportar">Exportar Excel (modelo da Cia)</button>${downloads?'<button class="btn sm" data-act="csv">Baixar planilha (CSV)</button>':''}<button class="btn sm" data-act="copiar">Copiar tabela</button></div></div>
     <p class="small muted" style="margin:6px 0 12px">Calculada pela folga atual, com afastamentos e feriados já lançados. Muda sozinha quando alguém entra ou sai. Clique num dia para trocar militares.</p>
     <div class="controls">
       <label class="f">A partir de<input type="date" id="pv-ini" value="${ini}" min="${c.inicio}"></label>
@@ -844,6 +844,113 @@ function viewAjustes(){
     <li>Dias passados ficam gravados no histórico. Trocas feitas à mão são respeitadas, e o restante da previsão se recalcula a partir delas.</li></ol></section>`;
 }
 
+/* ===================== exportar a prévia no modelo da planilha (.xlsx) ===================== */
+/* Linhas do modelo; "fonte" = escala do app que preenche a linha (editável em Exportar planilha). */
+const MODELO_PLAN=[
+  {b:'ext',tipo:'SERVIÇOS EXTERNOS',local:'QGI',id:'adjqgi',rot:'Adj Of Dia QGI',fonte:''},
+  {b:'ext',tipo:'SERVIÇOS EXTERNOS',local:'Cmdo 2ª DE',id:'perm2de',rot:'Permanência',fonte:''},
+  {b:'ext',tipo:'SERVIÇOS EXTERNOS',local:'Cmdo 2ª DE',id:'mot2de',rot:'Motorista',fonte:''},
+  {b:'ext',tipo:'SERVIÇOS EXTERNOS',local:'Forte IBIRAPUERA',id:'ofdfi',rot:'Of Dia FI',fonte:'ofd'},
+  {b:'ext',tipo:'SERVIÇOS EXTERNOS',local:'Forte IBIRAPUERA',id:'adjfi',rot:'Adj Of Dia FI',fonte:'adj'},
+  {b:'ext',tipo:'SERVIÇOS EXTERNOS',local:'Forte IBIRAPUERA',id:'cmtgdfi',rot:'Cmt Gd FI',fonte:''},
+  {b:'ext',tipo:'SERVIÇOS EXTERNOS',local:'Forte IBIRAPUERA',id:'gdfi',rot:'Gd FI',fonte:'guarda'},
+  {b:'ext',tipo:'MISSÕES EXTR',local:'',id:'gdfim',rot:'Gd FI',fonte:''},
+  {b:'int',tipo:'SERVIÇOS INTERNOS',local:'Sgt Dia',id:'sgtdia',rot:'Sgt Dia',fonte:'sgt'},
+  {b:'int',tipo:'SERVIÇOS INTERNOS',local:'Cb Dia',id:'cbdia',rot:'Cb Dia',fonte:'cabo'},
+  {b:'int',tipo:'SERVIÇOS INTERNOS',local:'Plantões ou Permanência',id:'plant1',rot:'Plantões ou Permanência (1ª linha)',fonte:'perm'},
+  {b:'int',tipo:'SERVIÇOS INTERNOS',local:'Plantões ou Permanência',id:'plant2',rot:'Plantões ou Permanência (2ª linha)',fonte:''},
+  {b:'int',tipo:'SERVIÇOS INTERNOS',local:'Plantões ou Permanência',id:'plant3',rot:'Plantões ou Permanência (3ª linha)',fonte:''},
+  {b:'ord',tipo:'MISSÕES ORDINÁRIAS',local:'Guia TFM',id:'guiatfm',rot:'Guia TFM',fonte:'',verde:true},
+  {b:'ord',tipo:'MISSÕES ORDINÁRIAS',local:'Mot Savs Cmdo 2ª DE',id:'motsavs',rot:'Mot Savs Cmdo 2ª DE',fonte:'texto',texto:'a cargo do Enc Vtr'},
+];
+function modeloPlan(){const o=state.config.modeloPlanilha||{};return MODELO_PLAN.map(r=>({...r,...(o[r.id]||{})}))}
+function fontesPlan(){return [['','— em branco —'],...ordemDia().map(e=>[e,ESC[e].nome]),...EXT_ORDEM.map(e=>[e,EXT[e].nome]),['texto','Texto fixo']]}
+/* nomes de cada fonte em cada dia do intervalo */
+function nomesPorFonte(ini,fim){const out={};
+  for(const e of ordemDia()){if(!milsEsc(e).length)continue;out[e]={};for(const x of simulate(fim,{esc:e}).days)if(x.d>=ini&&!x.folgaDia)out[e][x.d]=x.ids.map((id,i)=>nomeDia(x,i))}
+  for(const e of EXT_ORDEM){out[e]={};for(let d=ini;d<=fim;d=addDays(d,1)){const v=extDia(d)?.[e];if(v?.n)out[e][d]=[v.n]}}
+  return out}
+const DIAS3=['DOM','SEG','TER','QUA','QUI','SEX','SAB'];
+function montarPlanilha(ini){
+  const fim=addDays(ini,6),dias=[...Array(7)].map((_,k)=>addDays(ini,k)),rows=modeloPlan(),fonte=nomesPorFonte(ini,fim);
+  const fds=d=>(getOv(d,'guarda')?.cor||corDia(d).cor)==='V';
+  const brY4=d=>`${d.slice(8)}/${d.slice(5,7)}/${d.slice(0,4)}`;
+  const G=[],M=[],H={};const cell=(r,c,v,s)=>{(G[r]||=[])[c]={v:v??'',s:s||{}}};const merge=(r1,c1,r2,c2)=>{if(r1!==r2||c1!==c2)M.push([r1,c1,r2,c2])};
+  const B={b:1,c:1,bold:1},CB={b:1,c:1};let r=0;
+  const cab=()=>{ // duas linhas de cabeçalho: dia da semana e data
+    dias.forEach((d,k)=>{const f=fds(d)?{fill:'FCE4D6'}:{};cell(r,3+k,DIAS3[dow(d)],{...B,...f});cell(r+1,3+k,brY4(d),{...B,...f})})};
+  const val=(row,d)=>{if(row.fonte==='texto')return row.texto||'';const L=fonte[row.fonte]?.[d];return L?L.join('\n'):''};
+  const linha=(row,rr)=>dias.forEach((d,k)=>{const v=val(row,d);cell(rr,3+k,v,{b:1,c:1,wrap:1,...(fds(d)?{fill:'FCE4D6'}:{})});H[rr]=Math.max(H[rr]||15,13*Math.max(1,String(v).split('\n').length)+3)});
+  // bloco 1: serviços externos
+  cell(r,0,'TIPO',B);cell(r,1,'LOCAL',B);cell(r,2,'DATA',B);cell(r+1,2,'',B);merge(r,0,r+1,0);merge(r,1,r+1,1);cab();r+=2;
+  const blocos=[['ext',null],['int','SERVIÇO/MISSÃO'],['ord','MISSÃO']];
+  for(const [bl,sub] of blocos){
+    const L=rows.filter(x=>x.b===bl);
+    if(bl!=='ext'){r++;cell(r,0,'TIPO',B);cell(r,1,'DATA',B);cell(r,2,'',B);merge(r,1,r,2);cell(r+1,1,sub,B);cell(r+1,2,'',B);merge(r+1,1,r+1,2);merge(r,0,r+1,0);cab();r+=2}
+    const r0=r;
+    L.forEach(row=>{
+      cell(r,0,row.tipo,{...CB,bold:1});
+      if(bl==='ext'){cell(r,1,row.local,{...CB,bold:1});cell(r,2,row.rot,{b:1,right:1,bold:1})}
+      else{cell(r,1,row.local,{...CB,bold:1,...(row.verde?{fill:'C6E0B4'}:{})});cell(r,2,'',{b:1,...(row.verde?{fill:'C6E0B4'}:{})})}
+      linha(row,r);r++});
+    // junta células iguais em sequência: TIPO (col A) e LOCAL (col B, ou B:C nos blocos sem coluna de função)
+    const runs=key=>{const out=[];let s=0;for(let i=1;i<=L.length;i++)if(i===L.length||L[i][key]!==L[s][key]){out.push([r0+s,r0+i-1]);s=i}return out};
+    for(const [a,z] of runs('tipo'))merge(a,0,z,0);
+    for(const [a,z] of runs('local'))merge(a,1,z,bl==='ext'?1:2);
+  }
+  return xlsxBin([{nome:'Previsão',G,M,H,cols:[16,17,17,...Array(7).fill(24)]}]);
+}
+/* ----- gerador mínimo de .xlsx (sem biblioteca): XML + zip sem compressão ----- */
+function xlsxBin(sheets){
+  const X=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fills=['<fill><patternFill patternType="none"/></fill>','<fill><patternFill patternType="gray125"/></fill>'],fillIx={};
+  const xfs=['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'],xfIx={};
+  const sty=s=>{let f=0;if(s.fill){if(fillIx[s.fill]==null){fillIx[s.fill]=fills.length;fills.push(`<fill><patternFill patternType="solid"><fgColor rgb="FF${s.fill}"/><bgColor indexed="64"/></patternFill></fill>`)}f=fillIx[s.fill]}
+    const k=[s.bold?1:0,f,s.b?1:0,s.c?1:0,s.right?1:0,s.wrap?1:0].join();if(xfIx[k]!=null)return xfIx[k];
+    xfIx[k]=xfs.length;xfs.push(`<xf numFmtId="0" fontId="${s.bold?1:0}" fillId="${f}" borderId="${s.b?1:0}" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="${s.c?'center':s.right?'right':'left'}" vertical="center"${s.wrap||s.c?' wrapText="1"':''}/></xf>`);return xfIx[k]};
+  const col=c=>{let s='';c++;while(c){const m=(c-1)%26;s=String.fromCharCode(65+m)+s;c=Math.floor((c-1)/26)}return s};
+  const ws=sheets.map(sh=>{const nR=sh.G.length,nC=Math.max(0,...Array.from(sh.G,r=>r?r.length:0));let rows='';
+    for(let r=0;r<nR;r++){let cs='';for(let c=0;c<nC;c++){const x=sh.G[r]?.[c];const s=x?sty(x.s):sty({});const ref=col(c)+(r+1);
+        cs+=x&&x.v!==''?`<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${X(x.v)}</t></is></c>`:`<c r="${ref}" s="${s}"/>`}
+      rows+=`<row r="${r+1}"${sh.H[r]?` ht="${sh.H[r]}" customHeight="1"`:''}>${cs}</row>`}
+    const cols=`<cols>${sh.cols.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols>`;
+    const mg=sh.M.length?`<mergeCells count="${sh.M.length}">${sh.M.map(([a,b,c,d])=>`<mergeCell ref="${col(b)}${a+1}:${col(d)}${c+1}"/>`).join('')}</mergeCells>`:'';
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${rows}</sheetData>${mg}<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/></worksheet>`});
+  const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="9"/><name val="Calibri"/></font><font><b/><sz val="9"/><name val="Calibri"/></font></fonts><fills count="${fills.length}">${fills.join('')}</fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color auto="1"/></left><right style="thin"><color auto="1"/></right><top style="thin"><color auto="1"/></top><bottom style="thin"><color auto="1"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${xfs.join('')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const files={
+    '[Content_Types].xml':`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`,
+    '_rels/.rels':`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    'xl/workbook.xml':`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s,i)=>`<sheet name="${X(s.nome)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets></workbook>`,
+    'xl/_rels/workbook.xml.rels':`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    'xl/styles.xml':styles};
+  ws.forEach((w,i)=>files[`xl/worksheets/sheet${i+1}.xml`]=w);
+  return zipStore(files);
+}
+function zipStore(files){
+  const enc=new TextEncoder(),T=zipStore.T||(zipStore.T=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})());
+  const crc=b=>{let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=T[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0};
+  const parts=[],cen=[];let off=0;
+  const u16=v=>[v&255,(v>>>8)&255],u32=v=>[v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255];
+  for(const [name,txt] of Object.entries(files)){const nm=enc.encode(name),data=enc.encode(txt),c=crc(data);
+    const loc=new Uint8Array([...u32(0x04034b50),...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(c),...u32(data.length),...u32(data.length),...u16(nm.length),...u16(0)]);
+    parts.push(loc,nm,data);
+    cen.push(new Uint8Array([...u32(0x02014b50),...u16(20),...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(c),...u32(data.length),...u32(data.length),...u16(nm.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(off)]),nm);
+    off+=loc.length+nm.length+data.length}
+  const cenLen=cen.reduce((a,b)=>a+b.length,0),n=Object.keys(files).length;
+  const end=new Uint8Array([...u32(0x06054b50),...u16(0),...u16(0),...u16(n),...u16(n),...u32(cenLen),...u32(off),...u16(0)]);
+  const all=[...parts,...cen,end],len=all.reduce((a,b)=>a+b.length,0),out=new Uint8Array(len);let p=0;for(const a of all){out.set(a,p);p+=a.length}return out}
+function proxQuarta(){let d=today();while(dow(d)!==3)d=addDays(d,1);return d}
+function dlgExportar(){const rows=modeloPlan(),F=fontesPlan();
+  openDlg('exportar',`<h2>Exportar planilha da previsão</h2>
+  <p class="hint">Gera um Excel (.xlsx) de 7 dias no modelo da Cia: serviços externos, internos e missões ordinárias, com sábado, domingo e feriado destacados.</p>
+  <label class="f">Primeiro dia<input type="date" id="xp-ini" value="${proxQuarta()}"><span class="hint">A planilha cobre este dia e os 6 seguintes.</span></label>
+  <details style="margin-top:4px"><summary class="small"><b>O que vai em cada linha</b> (toque para ajustar)</summary>
+  <div style="display:grid;gap:6px;margin-top:8px">${rows.map(r=>`<div class="slot" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><span class="small"><b>${esc(r.rot)}</b>${r.b==='ext'?`<br><span class="muted">${esc(r.local||r.tipo)}</span>`:''}</span>
+    <div style="display:grid;gap:4px"><select class="ctl xp-f" data-id="${r.id}">${F.map(([v,t])=>`<option value="${v}" ${r.fonte===v?'selected':''}>${esc(t)}</option>`).join('')}</select>
+    <input class="ctl xp-t" data-id="${r.id}" value="${esc(r.texto||'')}" placeholder="Texto" ${r.fonte==='texto'?'':'hidden'}></div></div>`).join('')}</div></details>
+  ${foot().replace('>Salvar<','>Baixar Excel<')}`,{});
+}
+
 /* ===================== diálogos ===================== */
 const dlg=$('#dlg'),dform=$('#dlgForm');let dlgKind=null,dlgData=null;
 function openDlg(kind,html,data){dlgKind=kind;dlgData=data||{};dform.innerHTML=html;if(!dlg.open)dlg.showModal();const f=dform.querySelector('input,select,textarea');if(f)f.focus()}
@@ -983,6 +1090,7 @@ const actions={
       for(const [m,add] of Object.entries(byM))await store.setMonth(m,{...(state.meses[m]?.dias||{}),...add})},'Dias ajustados conforme a planilha')},
   async carregarDados(e){if(!window.ESCALA_DADOS)return;if(state.busy)return;e.disabled=true;e.textContent='Carregando…';await importarBackup(JSON.stringify(window.ESCALA_DADOS))},
   editEscExt:e=>dlgEscExt(e.dataset.e),
+  exportar:()=>dlgExportar(),
   novoPeriodo:()=>dlgPeriodo(null),
   addPeriodoLinha:()=>{const box=$('#pe-rows');const rs=box.querySelectorAll('.pe-row'),last=rs[rs.length-1],e=$('#pe-esc').value;
     const fim=last?.querySelector('.pe-fim').value||today(),ini=addDays(fim,1);box.insertAdjacentHTML('beforeend',linhaPeriodo(rs.length,{ini,fim:addDays(ini,6),P:porDiaDe(e,'P'),V:porDiaDe(e,'V')}));
@@ -1066,6 +1174,17 @@ async function submitDlg(){
       const s2=novos.findIndex((b,j)=>j!==k&&b.ini<=a.fim&&a.ini<=b.fim);if(s2>=0)return fail(`Os períodos ${Math.min(k,s2)+1} e ${Math.max(k,s2)+1} têm datas que se sobrepõem.`)}
     const c={...state.config,periodos:[...L,...novos]};closeDlg();
     await mutate(()=>store.setConfig(c),novos.length>1?`${novos.length} períodos programados em ${ESC[esc0].nome}`:`${ESC[esc0].nome}: ${novos[0].P} na preta e ${novos[0].V} na vermelha de ${br(novos[0].ini)} a ${br(novos[0].fim)}`);
+  }else if(dlgKind==='exportar'){
+    const ini=$('#xp-ini').value;if(!ini)return fail('Escolha o primeiro dia.');
+    const mp={};document.querySelectorAll('.xp-f').forEach(el=>{const id=el.dataset.id,f=el.value,t=document.querySelector(`.xp-t[data-id="${id}"]`).value.trim();const pad0=MODELO_PLAN.find(r=>r.id===id);
+      if(f!==pad0.fonte||(f==='texto'&&t!==(pad0.texto||'')))mp[id]={fonte:f,...(f==='texto'?{texto:t}:{})}});
+    const ant=JSON.stringify(state.config.modeloPlanilha||{});
+    if(JSON.stringify(mp)!==ant&&state.canWrite)await mutate(()=>store.setConfig({...state.config,modeloPlanilha:mp}));
+    let bin;try{bin=montarPlanilha(ini)}catch(e){console.error(e);return fail('Não consegui montar a planilha: '+e.message)}
+    const fim=addDays(ini,6),nomeArq=`previsao-${ini.slice(8)}-${ini.slice(5,7)}_a_${fim.slice(8)}-${fim.slice(5,7)}-${fim.slice(0,4)}.xlsx`;
+    closeDlg();
+    try{await (downloads||downloadsLocal).save({filename:nomeArq,data:new Blob([bin],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})});toast('Planilha gerada: '+nomeArq)}
+    catch(e){if(e?.code!=='declined')toast('Não foi possível baixar a planilha.')}
   }else if(dlgKind==='escext'){
     const e=dlgData.e,c={...state.config},nm={...(c.nomesEscala||{})},n=$('#ee-nome').value.trim(),cu=$('#ee-curto').value.trim();
     if((!n||n===NOME_PADRAO[e].nome)&&(!cu||cu===NOME_PADRAO[e].curto))delete nm[e];else nm[e]={nome:n||NOME_PADRAO[e].nome,curto:cu||n||NOME_PADRAO[e].curto};c.nomesEscala=nm;
@@ -1100,6 +1219,7 @@ document.addEventListener('change',e=>{const id=e.target.id;
   else if(id==='pv-h'){ui.pvH=+e.target.value;saveUi();render()}
   else if(id==='pv-m'){ui.pvM=e.target.value;saveUi();render()}
   else if(id==='af-tipo'){ui.afTipo=e.target.value;render()}
+  else if(e.target.classList?.contains('xp-f')){const t=document.querySelector(`.xp-t[data-id="${e.target.dataset.id}"]`);if(t)t.hidden=e.target.value!=='texto'}
   else if(id==='pe-esc'&&!dlgData?.id){const x=e.target.value;document.querySelectorAll('#pe-rows .pe-p').forEach(i=>i.value=porDiaDe(x,'P'));document.querySelectorAll('#pe-rows .pe-v').forEach(i=>i.value=porDiaDe(x,'V'))}
   else if(id==='es-uteis'){const w=$('#es-v-wrap');if(w)w.hidden=e.target.checked;const w2=$('#es-emenda-wrap');if(w2)w2.hidden=!e.target.checked}
   else if(id==='pl-file'){const f=e.target.files&&e.target.files[0];if(!f)return;e.target.value='';
