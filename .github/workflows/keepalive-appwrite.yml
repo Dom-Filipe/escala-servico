@@ -1,0 +1,44 @@
+# Mantém o projeto do Appwrite ativo (o plano grátis pausa projetos parados)
+# e avisa por e-mail (falha do workflow) se ele já estiver pausado.
+name: Manter Appwrite ativo
+
+on:
+  schedule:
+    - cron: "17 12 * * 1,4"   # segunda e quinta, 09:17 em Brasília
+  workflow_dispatch:           # botão "Run workflow" para testar na hora
+
+env:
+  ENDPOINT: https://fra.cloud.appwrite.io/v1
+  PROJECT: 6acbff2d002e4d3afe17
+  DATABASE: jaguarmove
+  TABLE: 6ace34cd00100d3a6249
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ler a previsão pública
+        run: |
+          code=$(curl -sS -o resp.json -w '%{http_code}' \
+            -H "X-Appwrite-Project: $PROJECT" \
+            "$ENDPOINT/databases/$DATABASE/collections/$TABLE/documents/publico.previsao")
+          echo "HTTP $code"
+          if grep -q project_paused resp.json; then
+            echo "::error::Projeto PAUSADO no Appwrite. Entre em cloud.appwrite.io e clique em Restore."
+            exit 1
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::warning::Resposta inesperada: $(head -c 300 resp.json)"
+          fi
+
+      - name: Consulta com chave de API (opcional, se o secret existir)
+        env:
+          KEY: ${{ secrets.APPWRITE_API_KEY }}
+        if: env.KEY != ''
+        run: |
+          code=$(curl -sS -o resp2.json -w '%{http_code}' \
+            -H "X-Appwrite-Project: $PROJECT" -H "X-Appwrite-Key: $KEY" \
+            "$ENDPOINT/databases/$DATABASE/collections/$TABLE/documents?queries%5B0%5D=%7B%22method%22%3A%22limit%22%2C%22values%22%3A%5B1%5D%7D")
+          echo "HTTP $code"
+          if grep -q project_paused resp2.json; then echo "::error::Projeto PAUSADO no Appwrite."; exit 1; fi
