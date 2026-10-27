@@ -334,7 +334,7 @@ const getOv=(d,e)=>state.meses[monthKey(e||ui.esc,d.slice(0,7))]?.dias?.[d]||nul
 /* Regras:
    - Dia vermelho = sábado, domingo ou feriado; demais = preto. Cada cor tem sua própria folga.
    - Folga de uma cor = nº de dias daquela cor desde o último serviço nela, contando só os dias em que o militar estava disponível.
-   - Escala-se o mais folgado na cor do dia; desempate: há mais tempo sem serviço (qualquer cor), depois a ordem da lista.
+   - Escala-se o mais folgado na cor do dia; desempate: o mais moderno (maior número na lista; 1 = mais antigo).
    - Descanso mínimo: após um serviço, o militar fica fora pelos próximos N dias (2 dias = 48 h).
    - Afastado não concorre e não acumula folga. Dias já fixados (passados ou ajustados à mão) são respeitados. */
 function afastIndex(){const idx={};for(const a of Object.values(state.afast))(idx[a.militarId]||=[]).push(a);return idx}
@@ -387,7 +387,7 @@ function simulate(fim,opt={}){
     else{
       const dispAll=ativos.filter(m=>!af[m.id]&&!apr[m.id]&&!bq[m.id]&&!fixAhead.has(m.id)&&!cont.includes(m.id)),disp=dispAll.filter(m=>!blocoBq[m.id]);
       const sc=(a,b)=>{const A=st[a.id],B=st[b.id];if(B[cor]!==A[cor])return B[cor]-A[cor];
-        const la=A.last||'',lb=B.last||'';if(la!==lb)return la<lb?-1:1;return (a.ordem||0)-(b.ordem||0)};
+        return (b.ordem||0)-(a.ordem||0)};   // empate na folga: o mais moderno (maior número na lista) entra
       const forc=cont.concat(disp.filter(m=>obr[m.id]).sort(sc).slice(0,N-cont.length).map(m=>m.id));
       ids=forc.concat(disp.filter(m=>descansado(m)&&!forc.includes(m.id)).sort(sc).slice(0,N-forc.length).map(m=>m.id));
       if(ids.length<N)ids=ids.concat(dispAll.filter(m=>descansado(m)&&!ids.includes(m.id)).sort((a,b)=>(blocoBq[a.id]||0)-(blocoBq[b.id]||0)||sc(a,b)).slice(0,N-ids.length).map(m=>m.id)); // ninguém livre o bloco todo: entra quem está livre hoje
@@ -836,7 +836,7 @@ function viewAjustes(){
     <p class="hint" style="margin-top:8px">Importar grava por cima dos registros com o mesmo identificador e mantém os demais.</p></section>
   <section class="card"><h2>Como a escala é montada</h2><ol class="small" style="margin:8px 0 0;padding-left:1.2rem;display:grid;gap:4px;max-width:70ch">
     <li>Sábado, domingo e feriado são <b>escala vermelha</b>; os demais dias são <b>escala preta</b>. Cada cor tem uma folga separada.</li>
-    <li>Cada escala (guarda, cabo de dia e sargento de dia) é independente, com seus próprios militares e folgas. Em cada dia entram os militares com maior folga naquela cor. Empate: quem está há mais tempo sem serviço; depois a ordem da lista.</li>
+    <li>Cada escala (guarda, cabo de dia e sargento de dia) é independente, com seus próprios militares e folgas. Em cada dia entram os militares com maior folga naquela cor. Empate na folga: entra o <b>mais moderno</b>, que é o de maior número na lista (o nº 1 é o mais antigo).</li>
     <li>Quem tirou serviço fica ${c.descanso} dia(s) sem poder ser escalado (${c.descanso*24} h). Se faltar gente, o sistema usa quem tem menos descanso e avisa.</li>
     <li>Na <b>Perm Cmdo</b> quem tira a sexta (ou a véspera do feriado) continua no sábado, domingo e feriado seguintes; por isso o sistema só escala nesse dia quem está livre o bloco inteiro, inclusive nas outras escalas.</li>
     <li>Afastado não concorre, mas a folga dele continua contando. No dia da apresentação não é escalado; a partir do dia seguinte volta a concorrer normalmente e entra quando for o mais folgado. Militar novo entra com a folga inicial informada no cadastro.</li>
