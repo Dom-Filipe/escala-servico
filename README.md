@@ -88,3 +88,11 @@ Na versão no Claude: **Ajustes → Baixar backup (JSON)**. Na versão no Appwri
 Uma única coleção (`registros`). Cada documento tem id `<tipo>.<id>` e o conteúdo em JSON no atributo `dados`:
 `militares.*`, `afastamentos.*`, `meses.*` (histórico mensal de cada escala) e `config.geral` (regras e feriados).
 As alterações aparecem em tempo real em todos os aparelhos abertos.
+
+
+## Cadastro aberto e organizações
+
+- Qualquer pessoa cria conta na tela de entrada (**Criar conta**) e, em seguida, cria a sua **organização**. Cada organização é um *Team* do Appwrite; os registros recebem permissão só daquela equipe.
+- Operadores entram por convite: **Ajustes → Organização → Convidar operador** (o Appwrite envia o e-mail com o link).
+- A Cia, que existia antes, virou uma organização "legada": mantém os ids antigos (`<coleção>.<id>`) e o link da previsão sem parâmetro. Organizações novas usam `<código>.<col>.<id>` e a previsão pública em `previsao.html?o=<código>`.
+- Configuração da tabela no Appwrite (depois de migrar a Cia): **Row security ligado** e, nas permissões da tabela, o papel **Users** só com **Create**.

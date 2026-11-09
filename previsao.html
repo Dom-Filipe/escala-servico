@@ -109,7 +109,7 @@ async function carregar(){ultimaCarga=Date.now();
   try{
     if(!A||!window.Appwrite)throw new Error('config');
     const {Client,Databases}=window.Appwrite;const client=new Client().setEndpoint(A.endpoint).setProject(A.projectId);
-    const doc=await new Databases(client).getDocument(A.databaseId,A.collectionId,'publico.previsao');
+    const doc=await new Databases(client).getDocument(A.databaseId,A.collectionId,(()=>{let o=new URLSearchParams(location.search).get('o');try{if(o)localStorage.setItem('prev.org',o);else o=localStorage.getItem('prev.org')}catch(e){}return o&&/^[a-z0-9]{4,12}$/.test(o)?o+'.pub.previsao':'publico.previsao'})());
     dados=JSON.parse(doc.dados);
     ORDEM=Object.keys(dados.escalas||{});
     const g=new Date(dados.gerado);document.getElementById('atual').textContent=`Atualizada em ${g.toLocaleDateString('pt-BR')} às ${g.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`;

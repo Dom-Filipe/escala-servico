@@ -214,7 +214,7 @@ table.q{border-collapse:separate;border-spacing:0;width:auto;font-family:var(--f
 
 <header class="top">
   <div class="wrap top-in">
-    <div class="brand"><span class="eyebrow">Serviço de 24 horas · escala preta e vermelha</span><h1>Escala de Serviço</h1></div>
+    <div class="brand"><span class="eyebrow" id="brand-org">Serviço de 24 horas · escala preta e vermelha</span><h1>Escala de Serviço</h1></div>
     <div class="now" id="now"></div>
   </div>
   <nav class="tabs wrap" id="tabs" aria-label="Seções">
@@ -877,7 +877,7 @@ function viewAjustes(){
   const c=cfg(),y=+today().slice(0,4);
   const nac=[y,y+1].flatMap(yy=>Object.entries(feriadosNacionais(yy))).sort((a,b)=>a[0]<b[0]?-1:1).filter(([d])=>d>=addDays(today(),-30));
   const ign=c.feriadosIgnorados||[];
-  return `<section class="card"><h2>Regras da escala</h2>
+  return secaoOrg()+`<section class="card"><h2>Regras da escala</h2>
     <div class="fgrid" style="margin-top:12px">
       ${''&&ESC_ORDEM.map(e=>`<label class="f">${ESC[e].nome}: escalados na preta<input type="number" id="cf-por-${e}" min="1" max="20" value="${porDiaDe(e,'P')}"></label>${ESC[e].soUteis?`<input type="hidden" id="cf-porv-${e}" value="${porDiaDe(e,'P')}">`:`<label class="f">${ESC[e].nome}: escalados na vermelha<input type="number" id="cf-porv-${e}" min="1" max="20" value="${porDiaDe(e,'V')}"></label>`}`).join('')}
       <label class="f">Dias de descanso após o serviço<input type="number" id="cf-desc" min="0" max="7" value="${c.descanso}"><span class="hint">2 dias = 48 h. Quem tira sexta não pega sábado nem domingo.</span></label>
@@ -910,7 +910,7 @@ function viewAjustes(){
     ${Object.keys(state.plan).length?`<p class="hint" style="margin-top:8px">Última atualização: ${ESC_ORDEM.filter(e=>state.plan[e]).map(e=>`${ESC[e].curto} em ${brY(state.plan[e].atualizado)}`).join(' · ')}</p>`:''}</section>
   ${state.mode==='appwrite'?`<section class="card"><h2>Previsão para o pessoal</h2>
     <p class="small muted" style="margin:6px 0 10px">Página só de leitura, sem login, com os próximos 45 dias das escalas. Mostra apenas datas e nomes. Atualiza sozinha sempre que você altera a escala ou abre o app.</p>
-    <div class="row"><input class="ctl" id="pub-link" readonly value="${esc(location.origin+location.pathname.replace(/[^/]*$/,'')+'previsao.html')}" style="flex:1;min-width:220px"><button class="btn sm" data-act="copiarLink">Copiar link</button><button class="btn sm" data-act="publicarAgora">Atualizar agora</button></div>
+    <div class="row"><input class="ctl" id="pub-link" readonly value="${esc(linkPrevisao())}" style="flex:1;min-width:220px"><button class="btn sm" data-act="copiarLink">Copiar link</button><button class="btn sm" data-act="publicarAgora">Atualizar agora</button></div>
     ${state.pubOk===false?'<p class="err" style="margin-top:8px">Não consegui publicar. No Appwrite, abra a tabela da escala → Settings → ligue "Row security" e salve.</p>':''}</section>`:''}
   <section class="card"><h2>Backup dos dados</h2>
     <p class="small muted" style="margin:6px 0 12px">Baixe um arquivo com todos os militares, afastamentos, histórico e regras. Use para guardar uma cópia ou para levar os dados para outra versão do sistema (por exemplo, da versão no Claude para a versão no Appwrite).</p>
@@ -1179,6 +1179,10 @@ const actions={
   async carregarDados(e){if(!window.ESCALA_DADOS)return;if(state.busy)return;e.disabled=true;e.textContent='Carregando…';await importarBackup(JSON.stringify(window.ESCALA_DADOS))},
   editEscExt:e=>dlgEscExt(e.dataset.e),
   exportar:()=>dlgExportar(),
+  trocarOrg(){try{localStorage.removeItem('escala.org')}catch(e){}location.reload()},
+  async novaOrg(){const n=prompt('Nome da nova organização:');if(!n||!n.trim())return;
+    try{const t=await awTeams.create(window.Appwrite.ID.unique(),n.trim());await awTeams.updatePrefs(t.$id,{code:novoCodigo(),legacy:false});try{localStorage.setItem('escala.org',t.$id)}catch(e){}location.reload()}catch(e){toast(msgErroAw(e)+detErro(e))}},
+  async remMembro(el){try{await awTeams.deleteMembership(ORG.teamId,el.dataset.id);toast('Membro removido');membrosCache=null;render()}catch(e){toast(msgErroAw(e))}},
   novaBaixa:()=>dlgAfast(null,null,'Saúde'),
   async copiarEfetivo(){const t=textoEfetivo();try{await navigator.clipboard.writeText(t);toast('Mapa do efetivo copiado')}catch{prompt('Copie o texto:',t)}},
   novoPeriodo:()=>dlgPeriodo(null),
@@ -1303,6 +1307,9 @@ async function submitDlg(){
   }else closeDlg();
 }
 dform.addEventListener('submit',e=>{e.preventDefault();submitDlg()});
+document.addEventListener('submit',async e=>{if(e.target.id!=='org-conv')return;e.preventDefault();const em=$('#org-email').value.trim().toLowerCase();if(!em)return;
+  try{await awTeams.createMembership(ORG.teamId,['operador'],em,undefined,undefined,urlApp());toast('Convite enviado para '+em);membrosCache=null;render()}
+  catch(e2){toast((e2?.code===409?'Essa pessoa já é membro ou já foi convidada.':msgErroAw(e2))+detErro(e2))}});
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=actions[el.dataset.act];if(!a)return;
   if(el.type==='checkbox'){a(el);return}e.preventDefault();a(el)});
 document.addEventListener('change',e=>{const id=e.target.id;
@@ -1322,63 +1329,157 @@ window.addEventListener('hashchange',render);
 dlg.addEventListener('close',()=>{dlgKind=null});
 
 /* ===================== Appwrite (versão independente: GitHub / Vercel) =====================
-   Usa uma única coleção no Appwrite com dois atributos: "col" (string) e "dados" (string grande, JSON).
-   O id de cada documento é "<coleção>.<id>" (ex.: militares.m01, meses.cabo_2026-10, config.geral).
-   Expõe a mesma interface usada pela página (doc().set/delete/onSnapshot, collection().onSnapshot). */
-function telaLogin(account,erro){
+   Uma única tabela com "col" e "dados" (JSON). Cada conta pertence a uma ou mais ORGANIZAÇÕES
+   (Teams do Appwrite). Cada registro só pode ser lido/alterado pela equipe dona dele.
+   Id do registro: "<código>.<col curta>.<id>" (ex.: o4k2m9x.s.cabo_2026-10). A Cia, que já
+   existia antes do cadastro aberto, mantém o formato antigo "<coleção>.<id>" (organização legada). */
+const COL_CURTO={militares:'m',afastamentos:'a',meses:'s',planilha:'p',config:'c',publico:'pub'};
+const COL_LONGO=Object.fromEntries(Object.entries(COL_CURTO).map(([a,b])=>[b,a]));
+let ORG=null,awAccount=null,awTeams=null,awUser=null,awOrgs=[];
+const urlApp=()=>location.origin+location.pathname;
+function msgErroAw(e){const t=e&&e.type||'',c=e&&e.code;
+  if(t==='user_invalid_credentials'||c===401&&/credential|password/i.test(e.message||''))return 'E-mail ou senha incorretos.';
+  if(t==='user_already_exists')return 'Já existe uma conta com este e-mail. Use "Entrar" ou "Esqueci a senha".';
+  if(t==='password_recently_used'||t==='password_personal_data'||/password/i.test(t))return 'Senha fraca ou não permitida: use pelo menos 8 caracteres, sem o seu nome ou e-mail.';
+  if(c===429)return 'Muitas tentativas seguidas. Espere alguns minutos e tente de novo.';
+  if(t==='project_paused')return 'O servidor do app está pausado por inatividade. Avise o responsável (ele reativa em cloud.appwrite.io).';
+  if(!c||c===0||/fetch|network|cors/i.test(e.message||''))return 'Sem resposta do servidor. Confira sua internet.';
+  return 'Não foi possível concluir.'}
+const detErro=e=>' [detalhe: '+((e&&e.code)||'-')+' '+((e&&e.type)||'')+' '+((e&&e.message)||'')+']';
+function telaCard(html){$('#main').innerHTML=`<section class="card" style="max-width:440px;margin:32px auto;display:grid;gap:12px">${html}</section>`}
+/* entrar / criar conta / recuperar senha */
+function telaLogin(account,erro,aba){
   return new Promise(res=>{
-    $('#main').innerHTML=`<section class="card" style="max-width:420px;margin:40px auto;display:grid;gap:12px">
-      <h2>Entrar</h2><p class="small muted" style="margin:0">Use o e-mail e a senha cadastrados no Appwrite (Auth → Users).</p>
-      <form id="login-f" style="display:grid;gap:12px"><label class="f">E-mail<input type="email" id="lg-e" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
-      <label class="f">Senha<input type="password" id="lg-s" autocomplete="current-password" required></label>
-      <div class="err" id="lg-err">${esc(erro||'')}</div><button class="btn pri" type="submit">Entrar</button></form></section>`;
-    $('#login-f').addEventListener('submit',async ev=>{ev.preventDefault();
-      try{await account.createEmailPasswordSession($('#lg-e').value.trim().toLowerCase(),$('#lg-s').value);res()}
-      catch(e){const t=e&&e.type||'',c=e&&e.code;let m;
-        if(t==='user_invalid_credentials'||c===401&&/credential|password/i.test(e.message||''))m='E-mail ou senha incorretos.';
-        else if(c===429)m='Muitas tentativas seguidas. Espere alguns minutos e tente de novo.';
-        else if(t==='user_session_already_exists'){res();return}
-        else if(!c||c===0||/fetch|network|cors/i.test(e.message||''))m='Sem resposta do Appwrite. Confira se o endereço deste site ('+location.hostname+') está em Overview → Add app → Web.';
-        else m='Não foi possível entrar.';
-        $('#lg-err').textContent=m+' [detalhe: '+(c||'-')+' '+(t||'')+' '+(e&&e.message||'')+']'}});
+    const mostra=(ab,er)=>{
+      const tabs=`<div class="row" style="gap:6px">${[['entrar','Entrar'],['criar','Criar conta'],['rec','Esqueci a senha']].map(([k,t])=>`<button type="button" class="btn sm ${ab===k?'pri':''}" data-aba="${k}">${t}</button>`).join('')}</div>`;
+      const corpo=ab==='criar'?`<h2>Criar conta</h2><p class="small muted" style="margin:0">Grátis. Depois de criar, você monta a sua organização e as suas escalas.</p>
+        <form id="lg-f" style="display:grid;gap:12px"><label class="f">Seu nome<input id="lg-n" autocomplete="name" required></label>
+        <label class="f">E-mail<input type="email" id="lg-e" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
+        <label class="f">Senha (mínimo 8 caracteres)<input type="password" id="lg-s" autocomplete="new-password" minlength="8" required></label>
+        <div class="err" id="lg-err">${esc(er||'')}</div><button class="btn pri" type="submit">Criar conta</button></form>`
+       :ab==='rec'?`<h2>Recuperar senha</h2><p class="small muted" style="margin:0">Enviamos um link para o seu e-mail para criar uma senha nova.</p>
+        <form id="lg-f" style="display:grid;gap:12px"><label class="f">E-mail<input type="email" id="lg-e" autocomplete="username" autocapitalize="none" required></label>
+        <div class="err" id="lg-err">${esc(er||'')}</div><button class="btn pri" type="submit">Enviar link</button></form>`
+       :`<h2>Entrar</h2><form id="lg-f" style="display:grid;gap:12px"><label class="f">E-mail<input type="email" id="lg-e" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
+        <label class="f">Senha<input type="password" id="lg-s" autocomplete="current-password" required></label>
+        <div class="err" id="lg-err">${esc(er||'')}</div><button class="btn pri" type="submit">Entrar</button></form>
+        <p class="small muted" style="margin:0">Não tem conta? Toque em <b>Criar conta</b>. Foi convidado? Abra o link do e-mail de convite.</p>`;
+      telaCard(tabs+corpo);
+      document.querySelectorAll('[data-aba]').forEach(b=>b.onclick=()=>mostra(b.dataset.aba));
+      $('#lg-f').addEventListener('submit',async ev=>{ev.preventDefault();const bt=ev.target.querySelector('button[type=submit]');bt.disabled=true;
+        const em=$('#lg-e').value.trim().toLowerCase();
+        try{
+          if(ab==='criar'){await account.create(window.Appwrite.ID.unique(),em,$('#lg-s').value,$('#lg-n').value.trim());await account.createEmailPasswordSession(em,$('#lg-s').value);res();return}
+          if(ab==='rec'){await account.createRecovery(em,urlApp());$('#lg-err').innerHTML='<span class="ok">Pronto! Se o e-mail tiver conta, chega um link em instantes (veja também o spam).</span>';bt.disabled=false;return}
+          await account.createEmailPasswordSession(em,$('#lg-s').value);res()}
+        catch(e){if(e&&e.type==='user_session_already_exists'){res();return}bt.disabled=false;$('#lg-err').textContent=msgErroAw(e)+detErro(e)}});
+    };
+    mostra(aba||'entrar',erro);
+  });
+}
+/* links que chegam por e-mail: convite para organização e recuperação de senha */
+async function tratarLinksEmail(account,teams){
+  const q=new URLSearchParams(location.search),limpa=()=>history.replaceState(null,'',urlApp()+location.hash);
+  if(q.get('membershipId')&&q.get('teamId')){
+    try{await teams.updateMembershipStatus(q.get('teamId'),q.get('membershipId'),q.get('userId'),q.get('secret'));try{localStorage.setItem('escala.org',q.get('teamId'))}catch(e){}}
+    catch(e){if(e?.code!==409)telaCard(`<h2>Convite</h2><p class="err">Não consegui aceitar o convite: ${esc(msgErroAw(e))}${esc(detErro(e))}</p><p class="small muted">O link pode ter expirado. Peça um convite novo.</p>`)}
+    limpa();
+    try{const u=await account.get();if(!u.passwordUpdate){let fn;const p=new Promise(r=>{telaCard(`<h2>Bem-vindo!</h2><p class="small muted" style="margin:0">Convite aceito. Crie uma senha para entrar das próximas vezes com o e-mail ${esc(u.email)}.</p>
+      <form id="ns-f" style="display:grid;gap:12px"><label class="f">Senha (mínimo 8 caracteres)<input type="password" id="ns-s" autocomplete="new-password" minlength="8" required></label><div class="err" id="ns-err"></div><button class="btn pri" type="submit">Salvar senha</button></form>`);
+      $('#ns-f').addEventListener('submit',async ev=>{ev.preventDefault();try{await account.updatePassword($('#ns-s').value);r()}catch(e){$('#ns-err').textContent=msgErroAw(e)+detErro(e)}})});await p}}catch(e){}
+    return}
+  if(q.get('userId')&&q.get('secret')&&q.get('expire')){
+    await new Promise(r=>{telaCard(`<h2>Criar senha nova</h2><form id="ns-f" style="display:grid;gap:12px"><label class="f">Nova senha (mínimo 8 caracteres)<input type="password" id="ns-s" autocomplete="new-password" minlength="8" required></label><div class="err" id="ns-err"></div><button class="btn pri" type="submit">Salvar senha</button></form>`);
+      $('#ns-f').addEventListener('submit',async ev=>{ev.preventDefault();try{await account.updateRecovery(q.get('userId'),q.get('secret'),$('#ns-s').value);r()}catch(e){$('#ns-err').textContent=msgErroAw(e)+detErro(e)}})});
+    limpa();return 'senha-nova'}
+}
+const novoCodigo=()=>'o'+Array.from(crypto.getRandomValues(new Uint8Array(6)),b=>'abcdefghijkmnpqrstuvwxyz23456789'[b%32]).join('');
+async function listarTudo(dbs,D,C){const {Query}=window.Appwrite;const out=[];let cursor=null;
+  for(;;){const q=[Query.limit(100)];if(cursor)q.push(Query.cursorAfter(cursor));const r=await dbs.listDocuments(D,C,q);out.push(...r.documents);if(r.documents.length<100)break;cursor=r.documents[r.documents.length-1].$id}
+  return out}
+const ehLegado=$id=>{const i=$id.indexOf('.');return i>0&&COL_CURTO[$id.slice(0,i)]!==undefined};
+const permsEquipe=(teamId,pub)=>{const {Permission:P,Role:R}=window.Appwrite;return[...(pub?[P.read(R.any())]:[]),P.read(R.team(teamId)),P.update(R.team(teamId)),P.delete(R.team(teamId))]};
+async function carregarOrgs(teams){const r=await teams.list();const out=[];
+  for(const t of r.teams){let p={};try{p=await teams.getPrefs(t.$id)}catch(e){}if(p.code==null&&!p.legacy)continue;out.push({teamId:t.$id,nome:t.name,code:p.code||'',legacy:!!p.legacy,total:t.total})}
+  return out}
+/* escolhe (ou cria) a organização com que vai trabalhar */
+async function escolherOrg(dbs,D,C,teams,user){
+  awOrgs=await carregarOrgs(teams);let salvo=null;try{salvo=localStorage.getItem('escala.org')}catch(e){}
+  if(awOrgs.length===1)return awOrgs[0];
+  if(awOrgs.length>1){const s=awOrgs.find(o=>o.teamId===salvo);if(s)return s;
+    return await new Promise(res=>{telaCard(`<h2>Escolha a organização</h2>${awOrgs.map(o=>`<button class="btn" data-org="${o.teamId}" style="justify-content:flex-start">${esc(o.nome)}</button>`).join('')}`);
+      document.querySelectorAll('[data-org]').forEach(b=>b.onclick=()=>res(awOrgs.find(o=>o.teamId===b.dataset.org)))})}
+  // nenhuma organização ainda
+  const docs=await listarTudo(dbs,D,C),leg=docs.filter(d=>ehLegado(d.$id));
+  const jaTemEquipe=leg.some(d=>(d.$permissions||[]).some(p=>/team:/.test(p)));
+  return await new Promise(res=>{
+    const podeMigrar=leg.length&&!jaTemEquipe;
+    telaCard(podeMigrar?`<h2>Organização da Cia</h2><p class="small muted" style="margin:0">Esta conta já tem uma escala cadastrada (${leg.length} registros). Agora o app tem cadastro aberto: cada escala fica dentro de uma organização, e só quem você convidar enxerga.</p>
+        <label class="f">Nome da organização<input id="or-n" value="Cia" required></label><div class="err" id="or-err"></div>
+        <button class="btn pri" id="or-ok">Criar organização com os dados atuais</button>`
+      :`<h2>Crie a sua organização</h2><p class="small muted" style="margin:0">A organização é onde ficam as suas escalas, militares e regras (ex.: "2ª Cia", "Pelotão de Guarda", "Plantão da Base"). Depois você pode convidar outros operadores por e-mail.</p>
+        <label class="f">Nome da organização<input id="or-n" placeholder="Ex.: 2ª Cia Fuz" required></label><div class="err" id="or-err"></div>
+        <button class="btn pri" id="or-ok">Criar organização</button>
+        ${leg.length&&jaTemEquipe?'<p class="small muted">Se você faz parte de uma organização que já existe, peça para o responsável te convidar pelo e-mail <b>'+esc(user.email)+'</b>.</p>':'<p class="small muted">Foi convidado? Abra o link que chegou no seu e-mail.</p>'}`);
+    $('#or-ok').onclick=async()=>{const n=$('#or-n').value.trim();if(!n){$('#or-err').textContent='Dê um nome.';return}$('#or-ok').disabled=true;
+      try{const t=await teams.create(window.Appwrite.ID.unique(),n);const org={teamId:t.$id,nome:n,code:podeMigrar?'':novoCodigo(),legacy:!!podeMigrar};
+        await teams.updatePrefs(t.$id,{code:org.code,legacy:org.legacy});
+        if(podeMigrar){let k=0;for(const d of leg){$('#or-err').innerHTML=`<span class="muted">Protegendo os dados… ${++k}/${leg.length}</span>`;
+          await dbs.updateDocument(D,C,d.$id,{},permsEquipe(t.$id,d.$id.startsWith('publico.')))}}
+        res(org)}catch(e){$('#or-ok').disabled=false;$('#or-err').textContent=msgErroAw(e)+detErro(e)}};
   });
 }
 async function appwriteDb(cfgA){
-  const {Client,Databases,Account,Query}=window.Appwrite;
+  const {Client,Databases,Account,Teams}=window.Appwrite;
   const client=new Client().setEndpoint(cfgA.endpoint).setProject(cfgA.projectId);
-  const account=new Account(client),dbs=new Databases(client),D=cfgA.databaseId,C=cfgA.collectionId;
+  const account=new Account(client),dbs=new Databases(client),teams=new Teams(client),D=cfgA.databaseId,C=cfgA.collectionId;
+  awAccount=account;awTeams=teams;
+  const link=await tratarLinksEmail(account,teams);
   let user=null;try{user=await account.get()}catch(e){}
-  if(!user){await telaLogin(account);user=await account.get()}
-  awAccount=account;const uid=user.$id;
+  if(!user){await telaLogin(account,link==='senha-nova'?'':null);user=await account.get()}
+  awUser=user;
+  ORG=await escolherOrg(dbs,D,C,teams,user);try{localStorage.setItem('escala.org',ORG.teamId)}catch(e){}
+  {const b=document.getElementById('brand-org');if(b)b.textContent=ORG.nome+' · escala de serviço'}
+  const pre=ORG.legacy?'':ORG.code+'.';
+  const idOf=(col,id)=>{const $id=ORG.legacy?col+'.'+id:pre+COL_CURTO[col]+'.'+id;if($id.length>36)throw new Error('Identificador muito longo: '+$id);return $id};
+  const parse=$id=>{if(ORG.legacy){if(!ehLegado($id))return null;const i=$id.indexOf('.');return[$id.slice(0,i),$id.slice(i+1)]}
+    if(!$id.startsWith(pre))return null;const r=$id.slice(pre.length),i=r.indexOf('.');const col=COL_LONGO[r.slice(0,i)];return col?[col,r.slice(i+1)]:null};
   const cache={},lis={};
-  const split=$id=>{const i=$id.indexOf('.');return[$id.slice(0,i),$id.slice(i+1)]};
-  const put=d=>{const [col,id]=split(d.$id);let v={};try{v=JSON.parse(d.dados||'{}')}catch(e){}(cache[col]||=new Map()).set(id,v)};
+  const put=d=>{const p=parse(d.$id);if(!p)return null;let v={};try{v=JSON.parse(d.dados||'{}')}catch(e){}(cache[p[0]]||=new Map()).set(p[1],v);return p[0]};
   const snapOf=col=>{const m=cache[col]||new Map();return{docs:[...m].map(([id,v])=>({id,exists:true,data:()=>v,metadata:{}})),size:m.size,empty:!m.size,metadata:{}}};
   const emit=col=>(lis[col]||[]).forEach(f=>f(snapOf(col)));
-  let cursor=null;
-  for(;;){const q=[Query.limit(100)];if(cursor)q.push(Query.cursorAfter(cursor));
-    const r=await dbs.listDocuments(D,C,q);r.documents.forEach(put);
-    if(r.documents.length<100)break;cursor=r.documents[r.documents.length-1].$id}
+  (await listarTudo(dbs,D,C)).forEach(put);
   client.subscribe([`databases.${D}.collections.${C}.documents`,`databases.${D}.tables.${C}.rows`],ev=>{
-    const d=ev.payload;if(!d||!d.$id||d.$id.indexOf('.')<0)return;const [col,id]=split(d.$id);
-    if(ev.events.some(e=>e.endsWith('.delete')))cache[col]?.delete(id);else put(d);emit(col)});
-  const api={
+    const d=ev.payload;if(!d||!d.$id)return;const p=parse(d.$id);if(!p)return;
+    if(ev.events.some(e=>e.endsWith('.delete')))cache[p[0]]?.delete(p[1]);else put(d);emit(p[0])});
+  const grava=async(col,id,data,pub)=>{const $id=idOf(col,id),body={col,dados:JSON.stringify(data)},perms=permsEquipe(ORG.teamId,pub);
+    try{await dbs.updateDocument(D,C,$id,body,perms)}catch(e){if(e.code===404)await dbs.createDocument(D,C,$id,body,perms);else throw e}};
+  return{
     /* registro com leitura pública (página previsao.html); exige "Row security" ligado na tabela */
-    async publish(path,data){const [col,id]=path.split('/'),$id=col+'.'+id;const {Permission,Role}=window.Appwrite;
-      const perms=[Permission.read(Role.any()),Permission.update(Role.user(uid)),Permission.delete(Role.user(uid))];
-      const body={col,dados:JSON.stringify(data)};
-      try{await dbs.updateDocument(D,C,$id,body,perms)}catch(e){if(e.code===404)await dbs.createDocument(D,C,$id,body,perms);else throw e}},
+    async publish(path,data){const [col,id]=path.split('/');await grava(col,id,data,true)},
     collection:col=>({onSnapshot(next){(lis[col]||=[]).push(next);setTimeout(()=>next(snapOf(col)));return()=>{}}}),
-    doc(path){const [col,id]=path.split('/'),$id=col+'.'+id;return{
-      async set(data){const body={col,dados:JSON.stringify(data)};
-        try{await dbs.updateDocument(D,C,$id,body)}catch(e){if(e.code===404)await dbs.createDocument(D,C,$id,body);else throw e}
-        (cache[col]||=new Map()).set(id,data);emit(col)},
-      async delete(){try{await dbs.deleteDocument(D,C,$id)}catch(e){if(e.code!==404)throw e}cache[col]?.delete(id);emit(col)},
+    doc(path){const [col,id]=path.split('/');return{
+      async set(data){await grava(col,id,data,false);(cache[col]||=new Map()).set(id,data);emit(col)},
+      async delete(){try{await dbs.deleteDocument(D,C,idOf(col,id))}catch(e){if(e.code!==404)throw e}cache[col]?.delete(id);emit(col)},
       onSnapshot(next){const f=()=>{const v=cache[col]?.get(id);next({id,exists:v!==undefined,data:()=>v,metadata:{}})};
         (lis[col]||=[]).push(f);setTimeout(f);return()=>{}}}}};
-  return api;
 }
-let awAccount=null;
+/* link público da previsão desta organização */
+const linkPrevisao=()=>{const b=location.origin+location.pathname.replace(/[^/]*$/,'')+'previsao.html';return ORG&&!ORG.legacy?b+'?o='+ORG.code:b};
+/* seção "Organização" nos Ajustes (só na versão com Appwrite) */
+function secaoOrg(){if(state.mode!=='appwrite'||!ORG)return'';
+  return `<section class="card" id="sec-org"><div class="spread"><h2>Organização</h2><div class="row">${awOrgs.length>1?'<button class="btn sm" data-act="trocarOrg">Trocar de organização</button>':''}<button class="btn sm" data-act="novaOrg">Criar outra organização</button></div></div>
+    <p class="small muted" style="margin:6px 0 10px"><b>${esc(ORG.nome)}</b> · você entrou como ${esc(awUser?.email||'')}. Só os membros desta organização veem e alteram estas escalas.</p>
+    <div id="org-membros">${htmlMembros()}</div>
+    <form id="org-conv" class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><input type="email" class="ctl" id="org-email" placeholder="E-mail de quem vai ajudar a escalar" style="flex:1 1 220px" autocapitalize="none" required><button class="btn sm pri" type="submit">Convidar operador</button></form>
+    <p class="hint">A pessoa recebe um e-mail com o link para entrar. Se ainda não tiver conta, cria a senha ao aceitar.</p></section>`}
+let membrosCache=null,membrosErro='',membrosBusy=false;
+async function carregarMembros(){if(!awTeams||!ORG||membrosBusy)return;membrosBusy=true;
+  try{const r=await awTeams.listMemberships(ORG.teamId);membrosCache=r.memberships;membrosErro=''}catch(e){membrosCache=[];membrosErro=msgErroAw(e)}membrosBusy=false;render()}
+function htmlMembros(){if(membrosCache===null){setTimeout(carregarMembros);return '<p class="small muted">Carregando membros…</p>'}
+  if(membrosErro)return `<p class="err small">Não consegui listar os membros: ${esc(membrosErro)}</p>`;
+  const souDono=membrosCache.some(m=>m.userId===awUser.$id&&m.roles.includes('owner'));
+  return `<div class="tbl-wrap"><table><thead><tr><th>Membro</th><th>Papel</th><th></th></tr></thead><tbody>${membrosCache.map(m=>`<tr><td><b>${esc(m.userName||m.userEmail)}</b><div class="small muted">${esc(m.userEmail)}</div></td><td class="small">${m.roles.includes('owner')?'Responsável':'Operador'}${m.confirm?'':' · <span class="tag">convite pendente</span>'}</td><td>${souDono&&m.userId!==awUser.$id?`<button class="btn sm" data-act="remMembro" data-id="${m.$id}">Remover</button>`:''}</td></tr>`).join('')}</tbody></table></div>`}
 const downloadsLocal={async save({filename,data}){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'text/plain;charset=utf-8'}));a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);return{status:'saved'}}};
 
 /* ===================== leitura da planilha da Cia (.xlsx) =====================
