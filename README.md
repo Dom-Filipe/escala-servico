@@ -8,6 +8,9 @@ Sistema web para montar e conferir as escalas de serviço de 24 horas:
 - Em cada dia entra o militar **mais folgado** na cor do dia. Desempate: há mais tempo sem serviço, depois a ordem da lista.
 - **Descanso mínimo de 48 h** após o serviço (quem tira sexta não pega sábado nem domingo).
 - **Empate na folga**: entra o mais moderno (maior número na lista; o nº 1 é o mais antigo).
+- **Mapa do efetivo** (aba Efetivo): situação de cada militar num dia (de serviço, afastado, apresentação, saindo de serviço, pronto), com resumo e texto para copiar.
+- **Baixas por saúde** (aba Baixas): baixas com diagnóstico/CID, situação e local; só operadores veem. "Apto com restrições" não tira da escala.
+- Afastamento de um militar vale em todas as escalas em que ele está vinculado.
 - **Exportar Excel (modelo da Cia)**: na Previsão, gera a planilha semanal (serviços externos, internos e missões ordinárias) já preenchida. Dá para escolher qual escala vai em cada linha.
 - **Descanso vale entre escalas**: quem é o mesmo militar em duas escalas (campo "Mesmo militar de outra escala") não pega serviço numa escala no dia, nem dentro do descanso, de um serviço em outra. Prioridade: Sgt de dia > Cb de dia > Guarda > escalas criadas > Perm Cmdo; a de menor prioridade cede, mas respeita os dias já fixados na outra. No quadro: **ES** (de serviço em outra escala), **SS** (saindo de serviço), **PS** (serviço logo depois).
 - **Efetivo por período**: em Ajustes, programe "de tal dia até tal dia, N militares" por escala (preta e vermelha). Fora do período vale o padrão da escala.

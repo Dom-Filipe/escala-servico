@@ -21,6 +21,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
+[hidden]{display:none!important}
 /* Layout: cabeçalho fixo com abas; quadro do dia + painéis laterais; tabelas densas para operação */
 :root{
   --bg:#eef0eb; --surface:#ffffff; --surface-2:#f6f7f3; --ink:#1a1e18; --muted:#5b6457; --line:#d6dbd0;
@@ -221,7 +222,9 @@ table.q{border-collapse:separate;border-spacing:0;width:auto;font-family:var(--f
     <a href="#previsao" data-tab="previsao">Previsão</a>
     <a href="#quadro" data-tab="quadro">Quadro</a>
     <a href="#militares" data-tab="militares">Militares</a>
+    <a href="#efetivo" data-tab="efetivo">Efetivo</a>
     <a href="#afastamentos" data-tab="afastamentos">Afastamentos</a>
+    <a href="#baixas" data-tab="baixas">Baixas</a>
     <a href="#ajustes" data-tab="ajustes">Ajustes</a>
   </nav>
   <div class="escbar wrap" id="escbar" role="group" aria-label="Escala"></div>
@@ -338,7 +341,7 @@ const getOv=(d,e)=>state.meses[monthKey(e||ui.esc,d.slice(0,7))]?.dias?.[d]||nul
    - Escala-se o mais folgado na cor do dia; desempate: o mais moderno (maior número na lista; 1 = mais antigo).
    - Descanso mínimo: após um serviço, o militar fica fora pelos próximos N dias (2 dias = 48 h).
    - Afastado não concorre e não acumula folga. Dias já fixados (passados ou ajustados à mão) são respeitados. */
-function afastIndex(){const idx={};for(const a of Object.values(state.afast))(idx[a.militarId]||=[]).push(a);return idx}
+function afastIndex(){const idx={},v=gruposVinc();for(const a of Object.values(state.afast))if(!a.naoAfasta)for(const i of [a.militarId,...(v[a.militarId]||[])])(idx[i]||=[]).push(a);return idx}  // o afastamento vale para o militar em todas as escalas
 function simulate(fim,opt={}){
   const E=opt.esc||ui.esc,c=cfg(E),R=c.descanso;
   const mils=milsEsc(E);
@@ -483,12 +486,12 @@ let rq=false;function render(){stateVer++;if(rq)return;rq=true;requestAnimationF
 function draw(){
   const t=today(),d=parse(t);
   $('#now').innerHTML=`${DOWL[d.getUTCDay()]}<br>${brY(t)}${state.mode==='appwrite'?'<br><button class="link small" data-act="sair">Sair</button>':''}`;
-  const h=(location.hash||'#hoje').slice(1);ui.tab=['hoje','previsao','quadro','militares','afastamentos','ajustes'].includes(h)?h:'hoje';
+  const h=(location.hash||'#hoje').slice(1);ui.tab=['hoje','previsao','quadro','militares','efetivo','afastamentos','baixas','ajustes'].includes(h)?h:'hoje';
   document.querySelectorAll('#tabs a').forEach(a=>{if(a.dataset.tab===ui.tab)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
   $('#escbar').innerHTML=ESC_ORDEM.map(e=>{const n=state.loaded?milsEsc(e).length:'';return `<button type="button" class="escbtn" data-act="setEsc" data-e="${e}" aria-pressed="${ui.esc===e}">${ESC[e].nome}<span class="mono">${n!==''?n+' '+ESC[e].quem:''} · ${state.loaded?porDiaTxt(e):ESC[e].def+'/dia'}</span></button>`}).join('');
   $('#escbar').hidden=ui.tab==='afastamentos';
   if(!state.loaded){return}
-  const views={hoje:viewHoje,previsao:viewPrevisao,quadro:viewQuadro,militares:viewMilitares,afastamentos:viewAfast,ajustes:viewAjustes};
+  const views={hoje:viewHoje,previsao:viewPrevisao,quadro:viewQuadro,militares:viewMilitares,afastamentos:viewAfast,efetivo:viewEfetivo,baixas:viewBaixas,ajustes:viewAjustes};
   const focusId=document.activeElement?.id;
   const trOld=$('#car-track');if(trOld)ui.carScroll=trOld.scrollLeft;
   $('#main').innerHTML=banners()+views[ui.tab]();
@@ -791,6 +794,84 @@ function viewAfast(){
   <section class="card"><details><summary>Encerrados (${fim.length})</summary>${tbl(fim,false,'Nenhum afastamento encerrado.')}</details></section>`;
 }
 
+/* ---------- Mapa do efetivo: onde está cada militar num dia ---------- */
+const SIT_SAUDE={disp:'Dispensado do serviço',intern:'Internado / baixado em hospital',restr:'Apto com restrições (continua na escala)'};
+function pessoasEfetivo(){ // cada pessoa uma vez, mesmo estando em mais de uma escala
+  const pr=prioridade(),vinc=gruposVinc(),vistos=new Set(),out=[];
+  const ord=Object.values(state.militares).filter(m=>ESC[escOf(m)]).sort((a,b)=>pr.indexOf(escOf(a))-pr.indexOf(escOf(b))||(a.ordem||0)-(b.ordem||0));
+  for(const m of ord){if(vistos.has(m.id))continue;const ids=[m.id,...(vinc[m.id]||[])];ids.forEach(i=>vistos.add(i));out.push({id:m.id,ids,escalas:[...new Set(ids.map(i=>escOf(state.militares[i])).filter(e=>ESC[e]))]})}
+  return out}
+function mapaEfetivo(d){
+  const ontem=addDays(d,-1),sv={},sai={};
+  for(const e of ordemDia()){if(!milsEsc(e).length)continue;const S=servicosDe(e,d);for(const [id,set] of Object.entries(S)){if(set.has(d))(sv[id]||=[]).push(ESC[e].curto||ESC[e].nome);if(set.has(ontem))(sai[id]||=[]).push(ESC[e].curto||ESC[e].nome)}}
+  for(const [dd,alvo] of [[d,sv],[ontem,sai]]){const x=extDia(dd)||{};for(const e of EXT_ORDEM)if(x[e]?.id)(alvo[x[e].id]||=[]).push(EXT[e].curto)}
+  const af=Object.values(state.afast),grupos={af:[],sv:[],apr:[],sai:[],pronto:[]};
+  for(const p of pessoasEfetivo()){
+    const A=af.filter(a=>p.ids.includes(a.militarId));
+    const atv=A.find(a=>!a.naoAfasta&&a.inicio<=d&&(!a.fim||d<=a.fim)),restr=A.find(a=>a.naoAfasta&&a.inicio<=d&&(!a.fim||d<=a.fim));
+    const svc=p.ids.flatMap(i=>sv[i]||[]),saiu=p.ids.flatMap(i=>sai[i]||[]),apr=A.find(a=>a.fim===ontem&&!a.naoAfasta);
+    const it={...p,nome:nome(p.id),restr};
+    if(atv)grupos.af.push({...it,af:atv});
+    else if(svc.length)grupos.sv.push({...it,onde:svc});
+    else if(apr)grupos.apr.push({...it,af:apr});
+    else if(saiu.length)grupos.sai.push({...it,onde:saiu});
+    else grupos.pronto.push(it)}
+  return grupos}
+function viewEfetivo(){
+  const d=ui.efD||today(),G=mapaEfetivo(d),flt=ui.efEsc||'';
+  const f=L=>flt?L.filter(p=>p.escalas.includes(flt)):L;
+  const g={af:f(G.af),sv:f(G.sv),apr:f(G.apr),sai:f(G.sai),pronto:f(G.pronto)};
+  const total=Object.values(g).reduce((a,L)=>a+L.length,0),porTipo={};for(const p of g.af)porTipo[p.af.tipo]=(porTipo[p.af.tipo]||0)+1;
+  const escTxt=p=>p.escalas.map(e=>ESC[e].curto||ESC[e].nome).join(' · ');
+  const card=(n,t,cls)=>`<div class="card" style="padding:12px;margin:0"><div class="eyebrow">${t}</div><div style="font-size:1.8rem;font-weight:700" class="${cls||''}">${n}</div></div>`;
+  const lista=(L,det)=>L.length?`<div class="tbl-wrap"><table><thead><tr><th>Militar</th><th>Escalas</th><th>Situação</th></tr></thead><tbody>${L.map(p=>`<tr><td><b>${esc(p.nome)}</b>${p.restr?' <span class="tag info" title="Apto com restrições">restrição</span>':''}</td><td class="small muted">${esc(escTxt(p))}</td><td class="small">${det(p)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="small muted">Ninguém.</p>';
+  const ate=a=>a.fim?`apresenta-se ${br(addDays(a.fim,1))}`:'sem data de apresentação';
+  return `<section class="card"><div class="spread"><h2>Mapa do efetivo</h2><div class="row">
+    <input type="date" class="ctl" id="ef-d" value="${d}" style="width:auto">
+    <select class="ctl" id="ef-esc" style="width:auto"><option value="">Todas as escalas</option>${ordemDia().filter(e=>milsEsc(e).length).map(e=>`<option value="${e}" ${flt===e?'selected':''}>${esc(ESC[e].nome)}</option>`).join('')}</select>
+    <button class="btn sm" data-act="copiarEfetivo">Copiar texto</button></div></div>
+    <p class="small muted" style="margin:6px 0 10px">Situação de cada militar em ${DOWL[dow(d)]} ${br(d)}. Quem está em mais de uma escala aparece uma vez só.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
+      ${card(total,'Efetivo')}${card(g.pronto.length,'Prontos')}${card(g.sv.length,'De serviço')}${card(g.sai.length,'Saindo de serviço')}${card(g.af.length,'Afastados','bad')}${card(g.apr.length,'Apresentação')}</div>
+    ${g.af.length?`<p class="small" style="margin:10px 0 0">${Object.entries(porTipo).map(([t,n])=>`<span class="tag ${t==='Saúde'?'bad':t==='Férias'?'ok':'info'}">${esc(t)}: ${n}</span>`).join(' ')}</p>`:''}</section>
+  <section class="card"><h3>De serviço (${g.sv.length})</h3>${lista(g.sv,p=>esc(p.onde.join(', ')))}</section>
+  <section class="card"><h3>Afastados (${g.af.length})</h3>${lista(g.af,p=>`<span class="tag ${p.af.tipo==='Saúde'?'bad':p.af.tipo==='Férias'?'ok':'info'}">${esc(p.af.tipo)}</span> ${esc(ate(p.af))}`)}</section>
+  <section class="card"><h3>Apresentação (${g.apr.length})</h3>${lista(g.apr,p=>`Volta de ${esc(p.af.tipo.toLowerCase())}; pronto a partir de ${br(addDays(d,1))}`)}</section>
+  <section class="card"><h3>Saindo de serviço (${g.sai.length})</h3>${lista(g.sai,p=>esc('Saiu de '+p.onde.join(', ')))}</section>
+  <section class="card"><details><summary><b>Prontos / de folga (${g.pronto.length})</b></summary>${lista(g.pronto,()=>'Pronto')}</details></section>`;
+}
+function textoEfetivo(){const d=ui.efD||today(),G=mapaEfetivo(d),flt=ui.efEsc||'';const f=L=>flt?L.filter(p=>p.escalas.includes(flt)):L;
+  const g={af:f(G.af),sv:f(G.sv),apr:f(G.apr),sai:f(G.sai),pronto:f(G.pronto)},tot=Object.values(g).reduce((a,L)=>a+L.length,0);
+  const L=[`*MAPA DO EFETIVO — ${DOWL[dow(d)]} ${br(d)}*${flt?' ('+ESC[flt].nome+')':''}`,`Efetivo: ${tot} · Prontos: ${g.pronto.length} · De serviço: ${g.sv.length} · Afastados: ${g.af.length}`,''];
+  if(g.sv.length){L.push('*De serviço*');g.sv.forEach(p=>L.push(`- ${p.nome} (${p.onde.join(', ')})`));L.push('')}
+  if(g.af.length){L.push('*Afastados*');g.af.forEach(p=>L.push(`- ${p.nome}: ${p.af.tipo}${p.af.fim?' até '+br(p.af.fim):''}`));L.push('')}
+  if(g.apr.length){L.push('*Apresentação*');g.apr.forEach(p=>L.push(`- ${p.nome}`));L.push('')}
+  if(g.sai.length){L.push('*Saindo de serviço*');g.sai.forEach(p=>L.push(`- ${p.nome}`))}
+  return L.join('\n').trim()}
+
+/* ---------- Baixas por saúde (com diagnóstico): só operadores veem; nunca vai para a página pública ---------- */
+function viewBaixas(){
+  const t=today(),L=Object.values(state.afast).filter(a=>a.tipo==='Saúde').sort((a,b)=>a.inicio<b.inicio?1:-1);
+  const em=L.filter(a=>a.inicio<=t&&(!a.fim||a.fim>=t)),fut=L.filter(a=>a.inicio>t),fim=L.filter(a=>a.fim&&a.fim<t);
+  const ano=t.slice(0,4),doAno=L.filter(a=>a.inicio.startsWith(ano)),diasAno=doAno.reduce((s,a)=>s+(a.fim?diff(a.inicio,a.fim)+1:diff(a.inicio,t)+1),0);
+  const row=a=>{const s=a.saude||{};return `<tr><td><b>${esc(nome(a.militarId))}</b><div class="small muted">${state.militares[a.militarId]?escNome(escOf(state.militares[a.militarId])):''}</div></td>
+    <td>${s.diag?esc(s.diag):'<span class="muted small">não informado</span>'}${s.cid?`<div class="small mono">CID ${esc(s.cid)}</div>`:''}</td>
+    <td class="small">${esc(SIT_SAUDE[s.sit||'disp'])}${s.local?`<div class="muted">${esc(s.local)}</div>`:''}</td>
+    <td class="mono small" style="white-space:nowrap">${br(a.inicio)} → ${a.fim?'apres. '+br(addDays(a.fim,1)):'sem data'}<div class="muted">${a.fim?diff(a.inicio,a.fim)+1+' dias':diff(a.inicio,t)+1+' dias até hoje'}</div></td>
+    <td class="small muted">${esc(a.obs||'')}</td><td><button class="btn sm" data-act="editAfast" data-id="${a.id}">Editar</button></td></tr>`};
+  const tbl=(l,v)=>l.length?`<div class="tbl-wrap"><table><thead><tr><th>Militar</th><th>Diagnóstico</th><th>Situação</th><th>Período</th><th>Obs.</th><th></th></tr></thead><tbody>${l.map(row).join('')}</tbody></table></div>`:`<p class="small muted">${v}</p>`;
+  return `<section class="card"><div class="spread"><h2>Baixas por saúde</h2>${state.canWrite?'<button class="btn sm pri" data-act="novaBaixa">Registrar baixa</button>':''}</div>
+    <p class="small muted" style="margin:6px 0 10px">Militares baixados por problema de saúde, com diagnóstico. "Dispensado" e "Internado" tiram o militar da escala até a apresentação; "Apto com restrições" só registra, ele continua sendo escalado.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
+      <div class="card" style="padding:12px;margin:0"><div class="eyebrow">Baixados hoje</div><div style="font-size:1.8rem;font-weight:700">${em.length}</div></div>
+      <div class="card" style="padding:12px;margin:0"><div class="eyebrow">Baixas em ${ano}</div><div style="font-size:1.8rem;font-weight:700">${doAno.length}</div></div>
+      <div class="card" style="padding:12px;margin:0"><div class="eyebrow">Dias de baixa em ${ano}</div><div style="font-size:1.8rem;font-weight:700">${diasAno}</div></div></div>
+    <p class="hint" style="margin-top:10px">🔒 Diagnóstico é dado pessoal sensível (LGPD). Fica visível só para quem entra no app como operador e nunca vai para a página de previsão do pessoal. Registre só o necessário.</p></section>
+  <section class="card"><h3>Em curso (${em.length})</h3>${tbl(em,'Nenhum militar baixado hoje.')}</section>
+  ${fut.length?`<section class="card"><h3>Programadas (${fut.length})</h3>${tbl(fut,'')}</section>`:''}
+  <section class="card"><details><summary>Encerradas (${fim.length})</summary>${tbl(fim.slice(0,100),'Nenhuma baixa encerrada.')}</details></section>`;
+}
+
 /* ---------- Ajustes ---------- */
 function viewAjustes(){
   const c=cfg(),y=+today().slice(0,4);
@@ -1001,14 +1082,21 @@ function dlgImport(){
   <label class="row small"><input type="checkbox" id="im-esp" checked> Espalhar as folgas iniciais (evita que todos sejam escalados juntos no começo)</label>
   ${foot()}`);
 }
-function dlgAfast(id,milId){
-  const a=id?state.afast[id]:null;
+function dlgAfast(id,milId,tipo0){
+  const a=id?state.afast[id]:null,tp=a?.tipo||tipo0||TIPOS[0],sd=a?.saude||{};
   const sel=a?.militarId||milId||'';
   openDlg('af',`<h2>${a?'Editar afastamento':'Registrar afastamento'}</h2>
   <label class="f">Militar<select id="af-mil"><option value="">Escolha…</option>${ESC_ORDEM.map(e=>`<optgroup label="${ESC[e].nome}">${milsEsc(e).map(m=>`<option value="${m.id}" ${sel===m.id?'selected':''}>${esc(nome(m.id))}</option>`).join('')}</optgroup>`).join('')}</select></label>
-  <div class="fgrid"><label class="f">Motivo<select id="af-t">${TIPOS.map(x=>`<option ${a?.tipo===x?'selected':''}>${x}</option>`).join('')}</select></label>
+  <div class="fgrid"><label class="f">Motivo<select id="af-t">${TIPOS.map(x=>`<option ${tp===x?'selected':''}>${x}</option>`).join('')}</select></label>
   <label class="f">Início do afastamento<input type="date" id="af-i" value="${a?.inicio||today()}"></label>
   <label class="f">Data de apresentação<input type="date" id="af-f" value="${a?.fim?addDays(a.fim,1):''}"><span class="hint">Nesse dia não é escalado; no dia seguinte já pode entrar de serviço. Em branco = ainda sem data.</span></label></div>
+  <div id="af-saude" ${tp==='Saúde'?'':'hidden'} style="display:grid;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px">
+    <b class="small">Baixa por saúde</b>
+    <div class="fgrid"><label class="f">Diagnóstico<input id="af-diag" value="${esc(sd.diag||'')}" placeholder="Ex.: entorse de tornozelo"></label>
+    <label class="f">CID-10 (opcional)<input id="af-cid" value="${esc(sd.cid||'')}" placeholder="Ex.: S93.4" style="text-transform:uppercase"></label></div>
+    <div class="fgrid"><label class="f">Situação<select id="af-sit">${Object.entries(SIT_SAUDE).map(([k,v])=>`<option value="${k}" ${(sd.sit||'disp')===k?'selected':''}>${v}</option>`).join('')}</select></label>
+    <label class="f">Local / médico (opcional)<input id="af-loc" value="${esc(sd.local||'')}" placeholder="Ex.: HMASP, Dr. Fulano"></label></div>
+    <span class="hint">🔒 Dado sensível: só operadores veem; não aparece na página do pessoal.</span></div>
   <label class="f">Observação<input id="af-o" value="${esc(a?.obs||'')}" placeholder="Ex.: BI nº 190, atestado de 5 dias"></label>
   ${foot(a?'<button type="button" class="btn danger" data-act="delAfast">Excluir</button>':'')}`,{id});
 }
@@ -1091,6 +1179,8 @@ const actions={
   async carregarDados(e){if(!window.ESCALA_DADOS)return;if(state.busy)return;e.disabled=true;e.textContent='Carregando…';await importarBackup(JSON.stringify(window.ESCALA_DADOS))},
   editEscExt:e=>dlgEscExt(e.dataset.e),
   exportar:()=>dlgExportar(),
+  novaBaixa:()=>dlgAfast(null,null,'Saúde'),
+  async copiarEfetivo(){const t=textoEfetivo();try{await navigator.clipboard.writeText(t);toast('Mapa do efetivo copiado')}catch{prompt('Copie o texto:',t)}},
   novoPeriodo:()=>dlgPeriodo(null),
   addPeriodoLinha:()=>{const box=$('#pe-rows');const rs=box.querySelectorAll('.pe-row'),last=rs[rs.length-1],e=$('#pe-esc').value;
     const fim=last?.querySelector('.pe-fim').value||today(),ini=addDays(fim,1);box.insertAdjacentHTML('beforeend',linhaPeriodo(rs.length,{ini,fim:addDays(ini,6),P:porDiaDe(e,'P'),V:porDiaDe(e,'V')}));
@@ -1106,7 +1196,7 @@ const actions={
   async qCopiar(){const txt=quadroTexto();try{await navigator.clipboard.writeText(txt);toast('Quadro copiado. Cole no Excel (Ctrl+V).')}
     catch(e){openDlg('copy',`<h2>Copiar quadro</h2><p class="hint">Selecione tudo (Ctrl+A), copie e cole no Excel.</p><textarea class="ctl" id="cp-t" rows="12" readonly>${esc(txt)}</textarea><div class="dlg-foot"><span></span><button type="button" class="btn" data-act="fechar">Fechar</button></div>`);$('#cp-t').select()}},
   async carregarEx(){const ex=exemplo([ui.esc]);await mutate(async()=>{await store.setConfig(ex.config);for(const m of Object.values(ex.mil))if(!state.militares[m.id])await store.setMilitar(m.id,m);for(const a of Object.values(ex.af))if(!state.afast[a.id])await store.setAfast(a.id,a)},`${ESC[ui.esc].quem} de exemplo carregados`)},
-  setEsc:e=>{ui.esc=e.dataset.e;ui.pvM='';saveUi();if(ui.tab==='afastamentos')location.hash='#hoje';render()},
+  setEsc:e=>{ui.esc=e.dataset.e;ui.pvM='';saveUi();if(['afastamentos','efetivo','baixas'].includes(ui.tab))location.hash='#hoje';render()},
   async limparEx(e){if(e.dataset.ok!=='1'){e.dataset.ok='1';e.textContent='Confirmar: remover exemplos';return}
     await mutate(async()=>{for(const m of milsEsc().filter(m=>m.exemplo)){for(const a of Object.values(state.afast).filter(a=>a.militarId===m.id))await store.delAfast(a.id);await store.delMilitar(m.id)}},'Exemplos removidos')},
   async delMil(e){if(e.dataset.ok!=='1'){e.dataset.ok='1';e.textContent='Confirmar exclusão';return}
@@ -1154,7 +1244,8 @@ async function submitDlg(){
   }else if(dlgKind==='af'){
     const mil=$('#af-mil').value,ini=$('#af-i').value,apres=$('#af-f').value||null,fim=apres?addDays(apres,-1):null;  // guarda o último dia fora
     if(!mil)return fail('Escolha o militar.');if(!ini)return fail('Informe o início do afastamento.');if(apres&&apres<=ini)return fail('A apresentação tem de ser depois do início do afastamento.');
-    const id=dlgData.id||newId('a');const data={militarId:mil,tipo:$('#af-t').value,inicio:ini,fim,obs:$('#af-o').value.trim()};
+    const id=dlgData.id||newId('a'),tipo=$('#af-t').value;const data={militarId:mil,tipo,inicio:ini,fim,obs:$('#af-o').value.trim()};
+    if(tipo==='Saúde'){const sit=$('#af-sit').value;data.saude={diag:$('#af-diag').value.trim(),cid:$('#af-cid').value.trim().toUpperCase(),sit,local:$('#af-loc').value.trim()};if(sit==='restr')data.naoAfasta=true}
     closeDlg();await mutate(()=>store.setAfast(id,data),`Afastamento registrado: ${nome(mil)}`);
   }else if(dlgKind==='day'){
     const ids=[],trocas={},fis=[];for(let i=0;i<dlgData.N;i++){const v=$('#dd-s'+i).value,t=$('#dd-t'+i)?.value||'';if(!v){if(t)return fail('Na linha '+(i+1)+', escolha primeiro quem estava escalado.');continue}
@@ -1220,6 +1311,8 @@ document.addEventListener('change',e=>{const id=e.target.id;
   else if(id==='pv-m'){ui.pvM=e.target.value;saveUi();render()}
   else if(id==='af-tipo'){ui.afTipo=e.target.value;render()}
   else if(e.target.classList?.contains('xp-f')){const t=document.querySelector(`.xp-t[data-id="${e.target.dataset.id}"]`);if(t)t.hidden=e.target.value!=='texto'}
+  else if(id==='af-t'){const b=$('#af-saude');if(b)b.hidden=e.target.value!=='Saúde'}
+  else if(id==='ef-d'){ui.efD=e.target.value||null;render()}else if(id==='ef-esc'){ui.efEsc=e.target.value;render()}
   else if(id==='pe-esc'&&!dlgData?.id){const x=e.target.value;document.querySelectorAll('#pe-rows .pe-p').forEach(i=>i.value=porDiaDe(x,'P'));document.querySelectorAll('#pe-rows .pe-v').forEach(i=>i.value=porDiaDe(x,'V'))}
   else if(id==='es-uteis'){const w=$('#es-v-wrap');if(w)w.hidden=e.target.checked;const w2=$('#es-emenda-wrap');if(w2)w2.hidden=!e.target.checked}
   else if(id==='pl-file'){const f=e.target.files&&e.target.files[0];if(!f)return;e.target.value='';
