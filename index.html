@@ -282,20 +282,24 @@ const ESC={sgt:{nome:'Sargento de dia',curto:'Sgt de dia',def:1,grad:'3º Sgt',q
            cabo:{nome:'Cabo de dia',curto:'Cb de dia',def:1,grad:'Cb',quem:'cabos'},
            guarda:{nome:'Guarda',curto:'Guarda',def:4,grad:'Sd',quem:'soldados'},
            perm:{nome:'Permanência do Comando',curto:'Perm Cmdo',def:1,grad:'Sd',quem:'militares',soUteis:true,emenda:true}};
-const ESC_BASE=Object.keys(ESC);
+const ESC_BASE=Object.keys(ESC);const ESC_DEF=Object.fromEntries(ESC_BASE.map(k=>[k,{...ESC[k]}]));
 const NOME_PADRAO={};for(const [k,v] of Object.entries(ESC))NOME_PADRAO[k]={nome:v.nome,curto:v.curto};
 const ESC_ORDEM=['guarda','cabo','sgt','perm'];
 /* escalas criadas pelo sargenteante ficam em config.escalasExtra */
+/* organizações novas começam zeradas: sem as escalas padrão da Cia (Guarda, Cb/Sgt de dia, Perm) e sem Of Dia/Adjunto */
+const semPadrao=()=>state.config.semEscalasPadrao===true||(state.orgNova&&state.config.semEscalasPadrao!==false);
 function rebuildEsc(){
   if(typeof stateVer!=='undefined')stateVer++;
   for(const k of Object.keys(ESC))if(!ESC_BASE.includes(k))delete ESC[k];
-  ESC_ORDEM.length=0;ESC_ORDEM.push('guarda','cabo','sgt','perm');
+  const zero=semPadrao();ESC_ORDEM.length=0;
+  for(const k of ['guarda','cabo','sgt','perm']){if(zero)delete ESC[k];else{if(!ESC[k])ESC[k]={...ESC_DEF[k]};ESC_ORDEM.push(k)}}
+  EXT_ORDEM.length=0;if(!zero)EXT_ORDEM.push('ofd','adj');
   for(const x of (state.config.escalasExtra||[])){if(!x||!x.id||ESC_BASE.includes(x.id))continue;
     ESC[x.id]={nome:x.nome,curto:x.curto||x.nome,def:Math.max(1,+x.P||1),grad:x.grad||'Sd',quem:x.quem||'militares',soUteis:!!x.soUteis,emenda:!!(x.soUteis&&x.emenda),extra:true,inicio:x.inicio||null};ESC_ORDEM.push(x.id)}
   // nomes editados pelo usuário (escalas padrão, oficial de dia e adjunto)
   const nm=state.config.nomesEscala||{};
-  for(const k of [...ESC_BASE,...EXT_ORDEM]){const alvo=ESC_BASE.includes(k)?ESC[k]:EXT[k],pad0=NOME_PADRAO[k];alvo.nome=nm[k]?.nome||pad0.nome;alvo.curto=nm[k]?.curto||nm[k]?.nome||pad0.curto}
-  if(typeof ui!=='undefined'&&!ESC[ui.esc])ui.esc='guarda';
+  for(const k of [...ESC_BASE,...EXT_ORDEM]){const alvo=ESC_BASE.includes(k)?ESC[k]:EXT[k],pad0=NOME_PADRAO[k];if(!alvo)continue;alvo.nome=nm[k]?.nome||pad0.nome;alvo.curto=nm[k]?.curto||nm[k]?.nome||pad0.curto}
+  if(typeof ui!=='undefined'&&!ESC[ui.esc])ui.esc=ESC_ORDEM[0]||null;
 }
 /* Oficial de dia e adjunto: a Cia não escala, só registra quando alguém dela é escalado (aparece na previsão) */
 const EXT={ofd:{nome:'Oficial de Dia',curto:'Of Dia'},adj:{nome:'Adjunto ao Oficial de Dia',curto:'Adj Of Dia'}};
@@ -313,8 +317,8 @@ const milsEsc=(e)=>Object.values(state.militares).filter(m=>escOf(m)===(e||ui.es
 const monthKey=(e,m)=>e==='guarda'?m:e+'_'+m;
 /* escalados por dia: número único ou {P,V} por cor (preta/vermelha) */
 function porDiaDe(e,cor,c0){const c=c0||{...DEFAULT_CFG,...state.config};const pe=c.porDiaEscala||{};
-  let v=pe[e]!=null?pe[e]:(e==='guarda'?c.porDia:ESC[e].def);
-  if(v&&typeof v==='object')v=cor?v[cor]:v.P;return Math.max(1,parseInt(v)||ESC[e].def)}
+  let v=pe[e]!=null?pe[e]:(e==='guarda'?c.porDia:(ESC[e]?.def||1));
+  if(v&&typeof v==='object')v=cor?v[cor]:v.P;return Math.max(1,parseInt(v)||ESC[e]?.def||1)}
 function porDiaTxt(e){const p=porDiaDe(e,'P'),v=porDiaDe(e,'V');return p===v?`${p}/dia`:`${p} preta · ${v} verm.`}
 function cfg(e){e=e||(typeof ui!=='undefined'?ui.esc:'guarda');const c={...DEFAULT_CFG,...state.config};if(!c.inicio)c.inicio=today();
   c.porDia=porDiaDe(e,'P',c);c.porDiaV=porDiaDe(e,'V',c);c.nDia=cor=>cor==='V'?(ESC[e].soUteis?(ESC[e].emenda?c.porDia:0):c.porDiaV):c.porDia;
@@ -494,7 +498,7 @@ function draw(){
   const views={hoje:viewHoje,previsao:viewPrevisao,quadro:viewQuadro,militares:viewMilitares,afastamentos:viewAfast,efetivo:viewEfetivo,baixas:viewBaixas,ajustes:viewAjustes};
   const focusId=document.activeElement?.id;
   const trOld=$('#car-track');if(trOld)ui.carScroll=trOld.scrollLeft;
-  $('#main').innerHTML=banners()+views[ui.tab]();
+  $('#main').innerHTML=banners()+(!ESC_ORDEM.length&&!['ajustes'].includes(ui.tab)?viewSemEscalas():views[ui.tab]());
   const trNew=$('#car-track');if(trNew&&ui.carScroll)trNew.scrollLeft=ui.carScroll;
   if(focusId){const el=document.getElementById(focusId);if(el&&el.tagName!=='BUTTON')el.focus()}
 }
@@ -872,6 +876,11 @@ function viewBaixas(){
   <section class="card"><details><summary>Encerradas (${fim.length})</summary>${tbl(fim.slice(0,100),'Nenhuma baixa encerrada.')}</details></section>`;
 }
 
+function viewSemEscalas(){return `<section class="card" style="max-width:560px;margin:24px auto;display:grid;gap:12px;text-align:left">
+  <h2>Crie a sua primeira escala</h2>
+  <p class="small muted" style="margin:0">Aqui começa zerado. Crie as escalas do seu jeito (ex.: "Guarda do quartel", "Plantão 24 h", "Sargento de dia"), defina quantos entram por dia na escala preta e na vermelha e depois cadastre as pessoas de cada uma.</p>
+  ${state.canWrite?'<button class="btn pri" data-act="novaEscala" style="justify-self:start">Criar escala</button>':'<p class="small muted">Peça a um operador para criar as escalas.</p>'}
+  <p class="small muted" style="margin:0">Regras gerais (descanso mínimo, feriados) ficam em <a href="#ajustes">Ajustes</a>.</p></section>`}
 /* ---------- Ajustes ---------- */
 function viewAjustes(){
   const c=cfg(),y=+today().slice(0,4);
@@ -1439,6 +1448,7 @@ async function appwriteDb(cfgA){
   if(!user){await telaLogin(account,link==='senha-nova'?'':null);user=await account.get()}
   awUser=user;
   ORG=await escolherOrg(dbs,D,C,teams,user);try{localStorage.setItem('escala.org',ORG.teamId)}catch(e){}
+  state.orgNova=!ORG.legacy;rebuildEsc();
   {const b=document.getElementById('brand-org');if(b)b.textContent=ORG.nome+' · escala de serviço'}
   const pre=ORG.legacy?'':ORG.code+'.';
   const idOf=(col,id)=>{const $id=ORG.legacy?col+'.'+id:pre+COL_CURTO[col]+'.'+id;if($id.length>36)throw new Error('Identificador muito longo: '+$id);return $id};
@@ -1652,5 +1662,13 @@ render();
 })();
 </script>
 
+<script>/* app sempre na versão mais nova: ao voltar para o app, procura atualização e recarrega */
+if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost")){
+  const tinha=!!navigator.serviceWorker.controller;let pend=false;
+  const recarrega=()=>{if(document.querySelector("dialog[open]")){pend=true;return}location.reload()};
+  navigator.serviceWorker.register("sw.js").then(r=>{const up=()=>r.update().catch(()=>{});
+    document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"){if(pend)recarrega();else up()}});setInterval(up,30*60*1000)}).catch(()=>{});
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{if(tinha)recarrega()});
+}</script>
 </body>
 </html>
