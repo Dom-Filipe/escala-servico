@@ -485,7 +485,7 @@ let rq=false;function render(){stateVer++;if(rq)return;rq=true;requestAnimationF
 
 function draw(){
   const t=today(),d=parse(t);
-  $('#now').innerHTML=`${DOWL[d.getUTCDay()]}<br>${brY(t)}${state.mode==='appwrite'?'<br><button class="link small" data-act="sair">Sair</button>':''}`;
+  $('#now').innerHTML=`${DOWL[d.getUTCDay()]}<br>${brY(t)}${state.mode==='appwrite'?'<br><button class="btn sm" data-act="sair" style="margin-top:4px">Sair</button>':''}`;
   const h=(location.hash||'#hoje').slice(1);ui.tab=['hoje','previsao','quadro','militares','efetivo','afastamentos','baixas','ajustes'].includes(h)?h:'hoje';
   document.querySelectorAll('#tabs a').forEach(a=>{if(a.dataset.tab===ui.tab)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
   $('#escbar').innerHTML=ESC_ORDEM.map(e=>{const n=state.loaded?milsEsc(e).length:'';return `<button type="button" class="escbtn" data-act="setEsc" data-e="${e}" aria-pressed="${ui.esc===e}">${ESC[e].nome}<span class="mono">${n!==''?n+' '+ESC[e].quem:''} · ${state.loaded?porDiaTxt(e):ESC[e].def+'/dia'}</span></button>`}).join('');
@@ -1468,7 +1468,7 @@ async function appwriteDb(cfgA){
 const linkPrevisao=()=>{const b=location.origin+location.pathname.replace(/[^/]*$/,'')+'previsao.html';return ORG&&!ORG.legacy?b+'?o='+ORG.code:b};
 /* seção "Organização" nos Ajustes (só na versão com Appwrite) */
 function secaoOrg(){if(state.mode!=='appwrite'||!ORG)return'';
-  return `<section class="card" id="sec-org"><div class="spread"><h2>Organização</h2><div class="row">${awOrgs.length>1?'<button class="btn sm" data-act="trocarOrg">Trocar de organização</button>':''}<button class="btn sm" data-act="novaOrg">Criar outra organização</button></div></div>
+  return `<section class="card" id="sec-org"><div class="spread"><h2>Organização</h2><div class="row"><button class="btn sm" data-act="sair">Sair da conta</button>${awOrgs.length>1?'<button class="btn sm" data-act="trocarOrg">Trocar de organização</button>':''}<button class="btn sm" data-act="novaOrg">Criar outra organização</button></div></div>
     <p class="small muted" style="margin:6px 0 10px"><b>${esc(ORG.nome)}</b> · você entrou como ${esc(awUser?.email||'')}. Só os membros desta organização veem e alteram estas escalas.</p>
     <div id="org-membros">${htmlMembros()}</div>
     <form id="org-conv" class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><input type="email" class="ctl" id="org-email" placeholder="E-mail de quem vai ajudar a escalar" style="flex:1 1 220px" autocapitalize="none" required><button class="btn sm pri" type="submit">Convidar operador</button></form>
